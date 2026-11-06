@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('产出浏览')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: topbar}"></header>
+<nav th:replace="~{fragments/layout :: nav('outputs')}"></nav>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title">产出文件</h2>
+      <div class="page-sub">外部批量导入工具在任务文件夹中产出的 CSV，独立于主用例列表。</div>
+    </div>
+    <div class="row-actions">
+      <button class="tool-btn" id="refreshOutputsBtn">刷新</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <input type="search" id="outputJobFilter" placeholder="按外部任务 ID 过滤…">
+    <div class="spacer"></div>
+    <a class="tool-btn" th:href="@{/external-jobs}">查看外部任务</a>
+  </div>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead>
+        <tr>
+          <th>文件</th><th>外部任务</th><th>状态</th><th class="num">大小</th>
+          <th class="num">用例</th><th>发现时间</th><th>说明</th><th>操作</th>
+        </tr>
+        </thead>
+        <tbody id="outputRows"></tbody>
+      </table>
+    </div>
+    <div class="panel-body"><div class="pagination" id="outputPager"></div></div>
+  </section>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('outputs')}"></th:block>
+</body>
+</html>

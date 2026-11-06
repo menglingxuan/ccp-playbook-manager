@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('任务详情')}"></head>
+<body th:attr="data-task-id=${taskId}">
+<header th:replace="~{fragments/layout :: topbar}"></header>
+<nav th:replace="~{fragments/layout :: nav('tasks')}"></nav>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title" id="taskTitle">任务详情</h2>
+      <div class="page-sub" id="taskSubtitle"></div>
+    </div>
+    <div class="row-actions">
+      <button class="tool-btn" id="backBtn">返回任务面板</button>
+      <button class="tool-btn danger" id="deleteTaskBtn">删除任务</button>
+    </div>
+  </div>
+
+  <section class="summary" id="taskSummary"></section>
+
+  <section class="panel" style="margin-bottom:16px">
+    <div class="panel-head"><h3>任务信息</h3></div>
+    <div class="panel-body"><div class="kv" id="taskInfo"></div></div>
+  </section>
+
+  <section class="panel" style="margin-bottom:16px">
+    <div class="panel-head"><h3>批次</h3></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+        <tr>
+          <th>批次</th><th>产品</th><th>Sheet</th><th>表头行</th><th>交易列</th>
+          <th class="num">行数</th><th class="num">无效</th><th>创建时间</th><th>操作</th>
+        </tr>
+        </thead>
+        <tbody id="batchRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h3>问题明细</h3><span class="muted" id="issueCount"></span></div>
+    <div class="panel-body"><div class="issues" id="taskIssues"></div></div>
+  </section>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('task-detail')}"></th:block>
+</body>
+</html>

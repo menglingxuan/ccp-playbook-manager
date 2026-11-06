@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('关于')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: topbar}"></header>
+<nav th:replace="~{fragments/layout :: nav('about')}"></nav>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title">关于</h2>
+      <div class="page-sub">运行模式、租户、数据目录与版本。</div>
+    </div>
+  </div>
+
+  <section class="panel" style="margin-bottom:16px">
+    <div class="panel-head"><h3>运行信息</h3></div>
+    <div class="panel-body"><div class="kv" id="aboutInfo"></div></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h3>审计日志</h3></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>时间</th><th>实体</th><th>动作</th><th>实体 ID</th><th>详情</th></tr></thead>
+        <tbody id="auditRows"></tbody>
+      </table>
+    </div>
+    <div class="panel-body"><div class="pagination" id="auditPager"></div></div>
+  </section>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('about')}"></th:block>
+</body>
+</html>

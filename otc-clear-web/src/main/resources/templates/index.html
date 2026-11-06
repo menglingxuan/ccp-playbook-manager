@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('导入任务')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: topbar}"></header>
+<nav th:replace="~{fragments/layout :: nav('tasks')}"></nav>
+
+<main class="page">
+  <section class="summary" id="summaryCards"></section>
+
+  <div class="filters" id="taskChips"></div>
+
+  <div class="toolbar">
+    <input type="search" id="taskSearch" placeholder="搜索文件名 / 任务 ID / 产品…">
+    <select id="taskStatus">
+      <option value="">全部状态</option>
+      <option value="SUCCEEDED">SUCCEEDED</option>
+      <option value="PARTIAL">PARTIAL</option>
+      <option value="FAILED">FAILED</option>
+      <option value="RUNNING">RUNNING</option>
+      <option value="PENDING">PENDING</option>
+    </select>
+    <select id="taskKind">
+      <option value="">全部类型</option>
+      <option value="FILE_UPLOAD">文件导入</option>
+      <option value="EXTERNAL_OUTPUT">外部产出</option>
+    </select>
+    <select id="taskProduct"></select>
+    <select id="taskSort">
+      <option value="created">按创建时间</option>
+      <option value="rows">按行数</option>
+      <option value="invalid">按无效行</option>
+      <option value="duration">按耗时</option>
+    </select>
+    <div class="spacer"></div>
+    <button class="tool-btn primary" id="newImportBtn">新建导入</button>
+    <button class="tool-btn" id="refreshTasksBtn">刷新</button>
+  </div>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table id="taskTable">
+        <thead>
+        <tr>
+          <th>任务 ID</th>
+          <th>类型</th>
+          <th>源文件</th>
+          <th>状态</th>
+          <th class="num">Sheet</th>
+          <th class="num">批次</th>
+          <th class="num">有效行</th>
+          <th class="num">无效行</th>
+          <th class="num">耗时(s)</th>
+          <th>创建时间</th>
+          <th>操作</th>
+        </tr>
+        </thead>
+        <tbody id="taskRows"></tbody>
+      </table>
+    </div>
+    <div class="panel-body">
+      <div class="pagination" id="taskPager"></div>
+    </div>
+  </section>
+
+  <p class="footer-note">数据目录由启动参数决定；删除任务会级联软删批次与用例。</p>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('tasks')}"></th:block>
+</body>
+</html>

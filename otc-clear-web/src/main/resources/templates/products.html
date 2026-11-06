@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('产品定义')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: topbar}"></header>
+<nav th:replace="~{fragments/layout :: nav('products')}"></nav>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title">产品字段定义</h2>
+      <div class="page-sub">字段顺序固定；列名允许重复，导入时按列位置对齐。</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <select id="productFilter"></select>
+    <div class="spacer"></div>
+    <span class="mono-sm" id="schemaHash"></span>
+  </div>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead>
+        <tr>
+          <th class="num">#</th><th>列名</th><th>显示名</th><th>Key</th><th>类型</th><th>角色</th>
+          <th>必填</th><th>业务键</th><th>别名</th><th>克隆模板</th>
+        </tr>
+        </thead>
+        <tbody id="fieldRows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('products')}"></th:block>
+</body>
+</html>

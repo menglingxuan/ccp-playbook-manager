@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('批次详情')}"></head>
+<body th:attr="data-batch-id=${batchId}">
+<header th:replace="~{fragments/layout :: topbar}"></header>
+<nav th:replace="~{fragments/layout :: nav('tasks')}"></nav>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title" id="batchTitle">批次详情</h2>
+      <div class="page-sub" id="batchSubtitle"></div>
+    </div>
+    <div class="row-actions">
+      <button class="tool-btn" id="backBtn">返回任务</button>
+      <button class="tool-btn" id="cloneBtn">克隆</button>
+      <button class="tool-btn" id="exportBtn">导出 CSV</button>
+      <button class="tool-btn" id="dispatchBtn">用批量导入工具导入</button>
+      <button class="tool-btn danger" id="deleteBatchBtn">删除批次</button>
+    </div>
+  </div>
+
+  <section class="summary" id="batchSummary"></section>
+
+  <div class="toolbar">
+    <input type="search" id="caseSearch" placeholder="搜索字段值 / Trade ID / 备注…">
+    <label class="muted" style="display:flex;gap:6px;align-items:center;font-size:12px">
+      <input type="checkbox" id="onlyFormula"> 仅含公式
+    </label>
+    <select id="pageSize">
+      <option value="25">25 / 页</option>
+      <option value="50" selected>50 / 页</option>
+      <option value="100">100 / 页</option>
+    </select>
+    <div class="spacer"></div>
+    <span class="muted" id="selectionInfo">未选择</span>
+    <button class="tool-btn" id="bulkDeleteBtn" disabled>批量删除</button>
+    <button class="tool-btn" id="refreshCasesBtn">刷新</button>
+  </div>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table id="caseTable">
+        <thead>
+        <tr>
+          <th class="checkbox-cell"><input type="checkbox" id="selectAll"></th>
+          <th class="num">行号</th>
+          <th>Test Case Id</th>
+          <th>Trade ID</th>
+          <th>Original Record</th>
+          <th>Business Record</th>
+          <th>预览字段</th>
+          <th class="num">公式</th>
+          <th>操作</th>
+        </tr>
+        </thead>
+        <tbody id="caseRows"></tbody>
+      </table>
+    </div>
+    <div class="panel-body">
+      <div class="pagination" id="casePager"></div>
+    </div>
+  </section>
+</main>
+
+<div id="drawerHost"></div>
+<div id="modalHost"></div>
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('batch')}"></th:block>
+</body>
+</html>

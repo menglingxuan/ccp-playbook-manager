@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('产出详情')}"></head>
+<body th:attr="data-output-id=${outputId}">
+<header th:replace="~{fragments/layout :: topbar}"></header>
+<nav th:replace="~{fragments/layout :: nav('outputs')}"></nav>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title" id="outputTitle">产出详情</h2>
+      <div class="page-sub" id="outputSubtitle"></div>
+    </div>
+    <div class="row-actions">
+      <button class="tool-btn" id="backBtn">返回产出列表</button>
+      <button class="tool-btn" id="reCloneBtn">再克隆</button>
+      <button class="tool-btn" id="reExportBtn">再导出</button>
+      <button class="tool-btn danger" id="deleteOutputBtn">删除产出</button>
+    </div>
+  </div>
+
+  <section class="panel" style="margin-bottom:16px">
+    <div class="panel-head"><h3>文件信息</h3></div>
+    <div class="panel-body"><div class="kv" id="outputInfo"></div></div>
+  </section>
+
+  <div class="toolbar">
+    <input type="search" id="outputCaseSearch" placeholder="搜索用例…">
+    <label class="muted" style="display:flex;gap:6px;align-items:center;font-size:12px">
+      <input type="checkbox" id="onlyFormula"> 仅含公式
+    </label>
+    <div class="spacer"></div>
+    <button class="tool-btn" id="refreshCasesBtn">刷新</button>
+  </div>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead>
+        <tr>
+          <th class="num">行号</th><th>Test Case Id</th><th>Trade ID</th><th>预览字段</th>
+          <th class="num">公式</th><th>操作</th>
+        </tr>
+        </thead>
+        <tbody id="outputCaseRows"></tbody>
+      </table>
+    </div>
+    <div class="panel-body"><div class="pagination" id="outputCasePager"></div></div>
+  </section>
+</main>
+
+<div id="drawerHost"></div>
+<div id="modalHost"></div>
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('output-detail')}"></th:block>
+</body>
+</html>

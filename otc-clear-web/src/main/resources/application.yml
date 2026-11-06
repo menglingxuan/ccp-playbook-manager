@@ -1,0 +1,84 @@
+server:
+  port: 8080
+  address: 127.0.0.1
+
+app:
+  version: 0.1.0
+  mode: SINGLE
+  tenant:
+    id: default
+    allow-header-override: false
+  # The effective data root is resolved from -Dapp.data-root or APP_DATA_ROOT so that the
+  # datasource URL can be computed before the context starts.
+  data-root: ./data
+  limits:
+    max-file-size-bytes: 52428800
+    max-rows-per-sheet: 200000
+    max-sheets: 50
+    max-clone-count: 200
+    max-bulk-delete: 500
+    upload-ttl-minutes: 60
+    max-scan-files: 200
+    max-scan-file-size: 104857600
+    preview-row-limit: 300
+    preview-sample-rows: 20
+    max-issue-details: 200
+  ids:
+    normalize-formula-refs: false
+    hash-length: 32
+  import:
+    reject-duplicate-key: false
+    duplicate-original-id-action: WARN
+  export:
+    default-delimiter: ","
+    default-quote-all: false
+    default-line-ending: CRLF
+    default-bom: false
+    default-managed-columns: KNOWN
+  external:
+    enabled: false
+    base-url: http://127.0.0.1:9000
+    dispatch-path: /api/jobs
+    status-path: /api/jobs/{externalJobId}
+    stop-path: /api/jobs/{externalJobId}/stop
+    callback-token: change-me
+    callback-base-url: http://127.0.0.1:8080
+    connect-timeout: 5s
+    read-timeout: 30s
+    poll-interval: 5s
+    poll-max-duration: 2h
+    folder-root: ""
+
+spring:
+  application:
+    name: otc-clear-testdata
+  jackson:
+    deserialization:
+      use-big-decimal-for-floats: true
+  datasource:
+    hikari:
+      maximum-pool-size: 8
+  flyway:
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+  servlet:
+    multipart:
+      max-file-size: 55MB
+      max-request-size: 60MB
+  thymeleaf:
+    cache: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    root: INFO
+    ac: INFO
+    org.apache.poi: WARN

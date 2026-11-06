@@ -1,0 +1,4 @@
+_TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction,Extra Ref
+TC-IRS-0001,imported from csv,IRS-1001,2026-01-05,2031-01-05,"1,500,000.00",USD,0.0325,0.0425,BUY,REF-A
+TC-IRS-0002,imported from csv,IRS-1002,2026-02-10,2031-02-10,2000000,EUR,0.0250,0.0350,SELL,REF-B
+TC-IRS-0003,imported from csv,IRS-1003,2026-03-15,2031-03-15,750000,GBP,0.0180,0.0280,BUY,REF-C
