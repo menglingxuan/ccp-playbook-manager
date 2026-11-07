@@ -1,0 +1,3 @@
+# Generated demo files must keep their exact bytes; the generator writes LF line endings.
+samples/*.csv -text
+samples/*.xlsx -text
