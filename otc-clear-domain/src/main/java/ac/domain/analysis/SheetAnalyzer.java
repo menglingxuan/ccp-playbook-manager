@@ -11,6 +11,7 @@ import ac.domain.layout.ColumnLayoutResolver;
 import ac.domain.layout.LayoutException;
 import ac.domain.layout.SheetLayout;
 import ac.domain.product.FieldDef;
+import ac.domain.product.HeaderNormalizer;
 import ac.domain.product.ProductSchema;
 import ac.domain.table.RawTable;
 import java.util.ArrayList;
@@ -152,6 +153,12 @@ public final class SheetAnalyzer {
             issues.add(ValidationIssue.error("TRADE_BLOCK_NOT_FOUND",
                     "No trade column matched the product definition"));
         }
+        if (schema.strictMatch()) {
+            String mismatch = strictMismatch(schema, layout);
+            if (mismatch != null) {
+                issues.add(ValidationIssue.error("STRICT_ORDER_MISMATCH", "Strict mode: " + mismatch));
+            }
+        }
         if (layout.dataStartRow() > table.rowCount()) {
             issues.add(ValidationIssue.error("NO_DATA_ROWS",
                     "No data rows found below row " + layout.headerRow()));
@@ -162,6 +169,34 @@ public final class SheetAnalyzer {
                     duplicatedHeaders + " product field(s) share a header name and are mapped by position"));
         }
         return issues;
+    }
+
+    /**
+     * Compares the trade block with the product business fields, position by position.
+     *
+     * @return a human readable mismatch description, or {@code null} when the order matches
+     */
+    private static String strictMismatch(ProductSchema schema, SheetLayout layout) {
+        List<FieldDef> expected = schema.tradeFields();
+        List<ColumnAssignment> block = layout.assignments().stream()
+                .filter(item -> item.columnNumber() >= layout.tradeStartColumn()
+                        && item.columnNumber() <= layout.tradeEndColumn())
+                .toList();
+        if (block.size() != expected.size()) {
+            return "the sheet has " + block.size() + " trade columns but the product defines "
+                    + expected.size();
+        }
+        for (int index = 0; index < expected.size(); index++) {
+            ColumnAssignment assignment = block.get(index);
+            String expectedHeader = expected.get(index).header();
+            String actualHeader = assignment.kind() == ColumnKind.TRADE ? assignment.header() : null;
+            if (actualHeader == null
+                    || !HeaderNormalizer.normalize(expectedHeader).equals(HeaderNormalizer.normalize(actualHeader))) {
+                return "column " + assignment.columnNumber() + " should be '" + expectedHeader
+                        + "' but the file has " + (actualHeader == null ? "an unknown column" : "'" + actualHeader + "'");
+            }
+        }
+        return null;
     }
 
     private static String describe(ColumnAssignment assignment) {

@@ -73,7 +73,7 @@ class SampleDataTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void wideCsvKeepsThirtyColumnsAndOneHundredRows() throws IOException {
+    void wideCsvKeepsSeventyColumnsAndOneHundredRows() throws IOException {
         SampleWorkbookGenerator.generate(samples);
         byte[] csv = Files.readAllBytes(samples.resolve(SampleWorkbookGenerator.WIDE_CSV_FILE));
 
@@ -91,14 +91,14 @@ class SampleDataTest extends AbstractIntegrationTest {
         JsonNode sheetPreview = body.get("preview");
         assertThat(sheetPreview.get("valid").asBoolean()).isTrue();
         JsonNode layout = sheetPreview.get("layout");
-        assertThat(layout.get("tradeStartColumn").asInt()).isEqualTo(3);
-        assertThat(layout.get("tradeEndColumn").asInt()).isEqualTo(26);
+        assertThat(layout.get("tradeStartColumn").asInt()).isEqualTo(5);
+        assertThat(layout.get("tradeEndColumn").asInt()).isEqualTo(SampleWorkbookGenerator.CSV_COLUMN_COUNT);
         assertThat(layout.get("lastColumn").asInt()).isEqualTo(SampleWorkbookGenerator.CSV_COLUMN_COUNT);
 
         JsonNode stats = sheetPreview.get("stats");
         assertThat(stats.get("dataRows").asInt()).isEqualTo(SampleWorkbookGenerator.CSV_ROW_COUNT);
-        assertThat(stats.get("mappedTradeColumns").asInt()).isEqualTo(24);
-        assertThat(stats.get("managedColumns").asInt()).isEqualTo(6);
+        assertThat(stats.get("mappedTradeColumns").asInt()).isEqualTo(66);
+        assertThat(stats.get("managedColumns").asInt()).isEqualTo(4);
 
         JsonNode sample = sheetPreview.get("sampleRows").get(0);
         assertThat(sample.get("values").get("tradeId").asString()).isEqualTo("CCS-W-0001");
@@ -110,7 +110,7 @@ class SampleDataTest extends AbstractIntegrationTest {
                 "force", false,
                 "sheets", List.of(java.util.Map.of("sheetIndex", 0, "productCode", "CCSIRS")))));
         assertThat(imported.ok()).as(imported.body()).isTrue();
-        assertThat(imported.json().get("status").asString()).isEqualTo("SUCCEEDED");
+        assertThat(imported.json().get("status").asString()).as(imported.body()).isEqualTo("SUCCEEDED");
         assertThat(imported.json().get("totalRows").asInt())
                 .isEqualTo(SampleWorkbookGenerator.CSV_ROW_COUNT);
     }

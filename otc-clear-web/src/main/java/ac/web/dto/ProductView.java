@@ -5,7 +5,7 @@ import ac.domain.product.ProductSchema;
 import java.util.List;
 
 /**
- * Product definition view.
+ * Runtime product schema view used by import, export and the context banner.
  *
  * @param code              product code
  * @param name              display name
@@ -26,26 +26,38 @@ public record ProductView(
         fields = List.copyOf(fields);
     }
 
-    /** One field definition. */
+    /**
+     * One resolved field.
+     *
+     * @param key           internal key
+     * @param order         1-based order
+     * @param header        header text
+     * @param type          logical value type
+     * @param role          trade or key role
+     * @param required      whether the value must be present
+     * @param businessKey   whether the field contributes to the business id
+     * @param duplicate     true when another field shares the header
+     * @param tags          field tags
+     */
     public record FieldView(
             String key,
             int order,
             String header,
-            String displayHeader,
             String type,
             String role,
             boolean required,
             boolean businessKey,
             boolean duplicate,
-            String aliases,
-            String clonePattern,
-            String format) {
+            List<String> tags) {
+
+        public FieldView {
+            tags = List.copyOf(tags);
+        }
 
         public static FieldView of(FieldDef field) {
-            return new FieldView(field.key(), field.order(), field.header(), field.displayHeader(),
-                    field.type().name(), field.role().name(), field.required(), field.businessKey(),
-                    field.hasDuplicateHeader(), String.join(", ", field.aliases()), field.clonePattern(),
-                    field.format());
+            return new FieldView(field.key(), field.order(), field.header(), field.type().name(),
+                    field.role().name(), field.required(), field.businessKey(), field.hasDuplicateHeader(),
+                    field.tags());
         }
     }
 

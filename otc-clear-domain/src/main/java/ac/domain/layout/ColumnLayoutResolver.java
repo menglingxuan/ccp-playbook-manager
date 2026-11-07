@@ -43,7 +43,7 @@ public final class ColumnLayoutResolver {
                     "Trade start column " + tradeStartColumn + " is outside the header range");
         }
 
-        List<FieldDef> fields = schema.fields();
+        List<FieldDef> fields = schema.tradeFields();
         int maxEnd = Math.min(lastColumnIndex, startIndex + fields.size() - 1);
         SequenceAligner.Alignment best = null;
         int bestEnd = -1;

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/layout :: head('产品定义')}"></head>
+<head th:replace="~{fragments/layout :: head(#{products.title})}"></head>
 <body>
 <header th:replace="~{fragments/layout :: topbar}"></header>
 <nav th:replace="~{fragments/layout :: nav('products')}"></nav>
@@ -8,30 +8,145 @@
 <main class="page">
   <div class="page-head">
     <div>
-      <h2 class="page-title">产品字段定义</h2>
-      <div class="page-sub">字段顺序固定；列名允许重复，导入时按列位置对齐。</div>
+      <h2 class="page-title" th:text="#{products.title}">产品字段定义</h2>
+      <div class="page-sub" th:text="#{products.subtitle}">平台 → 基产品 → 产品</div>
     </div>
   </div>
 
-  <div class="toolbar">
-    <select id="productFilter"></select>
-    <div class="spacer"></div>
-    <span class="mono-sm" id="schemaHash"></span>
-  </div>
+  <div class="steps plat-tabs" id="platformTabs"></div>
 
-  <section class="panel">
-    <div class="table-wrap">
-      <table>
-        <thead>
-        <tr>
-          <th class="num">#</th><th>列名</th><th>显示名</th><th>Key</th><th>类型</th><th>角色</th>
-          <th>必填</th><th>业务键</th><th>别名</th><th>克隆模板</th>
-        </tr>
-        </thead>
-        <tbody id="fieldRows"></tbody>
-      </table>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span th:text="#{products.sidebar.baseProducts}">基产品</span>
+        <button class="icon-btn primary sm" id="btnNewBase" th:title="#{products.btn.newBase}">
+          <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="M8 3v10M3 8h10"></path>
+          </svg>
+        </button>
+      </div>
+      <div id="baseList"></div>
+    </aside>
+
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title-block">
+            <h3 id="baseTitle" th:text="#{products.panel.placeholder.title}">请选择基产品</h3>
+            <div class="panel-sub hidden" id="baseDescription"></div>
+          </div>
+          <div class="row-actions">
+            <button class="icon-btn" id="btnGlobalSearch" th:title="#{products.search.button}">
+              <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="7" cy="7" r="4.5"></circle>
+                <path d="M10.4 10.4L13.6 13.6"></path>
+              </svg>
+            </button>
+            <button class="icon-btn" id="btnLockBase" disabled th:title="#{products.lock.unlock}"
+                    aria-pressed="false" data-lock="base">
+              <svg class="ico lock-on" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4.6 7.2V5.4a3.4 3.4 0 0 1 6.8 0v1.8M3.6 7.2h8.8v5.4a1 1 0 0 1-1 1H4.6a1 1 0 0 1-1-1V7.2z"></path>
+              </svg>
+              <svg class="ico lock-off" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4.6 7.2V5.4a3.4 3.4 0 0 1 6.6-1.1M3.6 7.2h8.8v5.4a1 1 0 0 1-1 1H4.6a1 1 0 0 1-1-1V7.2z"></path>
+              </svg>
+            </button>
+            <button class="icon-btn" id="btnEditBase" disabled th:title="#{products.btn.editBase}">
+              <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2.5 13.5l.9-3.2 7-7 2.3 2.3-7 7-3.2.9zM10.2 3.6l2.2 2.2"></path>
+              </svg>
+            </button>
+            <button class="icon-btn danger" id="btnDeleteBase" disabled th:title="#{products.btn.deleteBase}">
+              <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 4.5h10M6.4 4.5V2.9h3.2v1.6M4.6 4.5l.6 8.6h5.6l.6-8.6"></path>
+              </svg>
+            </button>
+            <button class="icon-btn primary" id="btnAddField" disabled th:title="#{products.btn.addField}">
+              <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                <path d="M8 3v10M3 8h10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="hidden" id="baseFieldTable">
+          <div class="filters-bar">
+            <div class="filter-input">
+              <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="7" cy="7" r="4.5"></circle>
+                <path d="M10.4 10.4L13.6 13.6"></path>
+              </svg>
+              <input type="search" data-ft="search" autocomplete="off" th:placeholder="#{products.field.searchPlaceholder}">
+            </div>
+            <select data-ft="type" aria-label="value type"></select>
+            <select data-ft="role" aria-label="role"></select>
+            <select data-ft="tag" aria-label="tag"></select>
+            <button class="toggle-btn" data-ft="required" th:text="#{products.field.requiredOnly}">仅必填</button>
+            <button class="icon-btn sm" data-ft="reset" th:title="#{common.reset}">
+              <svg class="ico" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2.8 8a5.2 5.2 0 1 0 1.6-3.7M2.8 2.4V5.2h2.8"></path>
+              </svg>
+            </button>
+            <span class="filters-count" data-ft="count"></span>
+          </div>
+
+          <div class="notice-bar hidden" data-ft="notice"></div>
+          <div class="filters" data-ft="chips"></div>
+
+          <div class="table-wrap">
+            <table class="table-dense field-table">
+              <thead>
+              <tr data-ft="head"></tr>
+              </thead>
+              <tbody data-ft="body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel-body" id="basePlaceholder">
+          <div class="muted" th:text="#{products.panel.placeholder.body}">请选择基产品</div>
+        </div>
+
+      </section>
+
+      <section class="panel hidden" id="productPanel">
+        <div class="panel-head">
+          <h3 th:text="#{products.products.title}">衍生产品</h3>
+          <button class="icon-btn primary" id="btnNewProduct" th:title="#{products.btn.newProduct}">
+            <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <path d="M8 3v10M3 8h10"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table class="table-dense">
+            <thead>
+            <tr>
+              <th th:text="#{products.products.column.code}">产品代码</th>
+              <th th:text="#{common.name}">名称</th>
+              <th class="num" th:text="#{products.products.column.fieldCount}">字段数</th>
+              <th class="num" th:text="#{products.products.column.caseCount}">用例数</th>
+              <th th:text="#{common.status}">状态</th>
+              <th class="col-switch" th:text="#{products.products.column.strict}">严格模式</th>
+              <th th:text="#{common.actions}">操作</th>
+            </tr>
+            </thead>
+            <tbody id="productRows"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
-  </section>
+  </div>
 </main>
 
 <div th:replace="~{fragments/layout :: toast}"></div>

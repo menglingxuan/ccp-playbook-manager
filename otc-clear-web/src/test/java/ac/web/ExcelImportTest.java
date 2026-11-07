@@ -26,6 +26,8 @@ class ExcelImportTest extends AbstractIntegrationTest {
     void detectsOffsetHeaderAndCapturesFormulas() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         byte[] workbook = buildWorkbook("IRS-" + suffix);
+        String productCode = productWithFields("MW", "IRS", List.of("tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "floatingRate", "direction", "portfolio"));
 
         var upload = api.upload("/api/uploads", "book_" + suffix + ".xlsx", workbook);
         assertThat(upload.ok()).as(upload.body()).isTrue();
@@ -34,10 +36,10 @@ class ExcelImportTest extends AbstractIntegrationTest {
         assertThat(uploadJson.get("sheets")).hasSize(2);
 
         var preview = api.post("/api/uploads/" + uploadJson.get("uploadId").asString() + "/preview",
-                api.toJson(Map.of("sheetIndex", 1)));
+                api.toJson(Map.of("sheetIndex", 1, "productCode", productCode)));
         assertThat(preview.ok()).as(preview.body()).isTrue();
         JsonNode previewJson = preview.json();
-        assertThat(previewJson.get("productCode").asString()).isEqualTo("IRS");
+        assertThat(previewJson.get("productCode").asString()).isEqualTo(productCode);
         JsonNode layout = previewJson.get("preview").get("layout");
         assertThat(layout.get("headerRow").asInt()).isEqualTo(3);
         assertThat(layout.get("tradeStartColumn").asInt()).isEqualTo(3);
@@ -50,8 +52,8 @@ class ExcelImportTest extends AbstractIntegrationTest {
                 "uploadId", uploadJson.get("uploadId").asString(),
                 "force", false,
                 "sheets", List.of(
-                        Map.of("sheetIndex", 0, "productCode", "IRS"),
-                        Map.of("sheetIndex", 1, "productCode", "IRS")))));
+                        Map.of("sheetIndex", 0, "productCode", productCode),
+                        Map.of("sheetIndex", 1, "productCode", productCode)))));
         assertThat(importResponse.ok()).as(importResponse.body()).isTrue();
         JsonNode importJson = importResponse.json();
         assertThat(importJson.get("batchCount").asInt()).isEqualTo(1);
@@ -79,7 +81,7 @@ class ExcelImportTest extends AbstractIntegrationTest {
 
             Row header = sheet.createRow(2);
             String[] headers = {"_TestCaseId", "_Remarks", "Trade ID", "Trade Date", "Maturity Date",
-                    "Notional", "Notional Currency", "Rate", "Rate", "Direction"};
+                    "Notional", "Notional Currency", "Rate", "Rate", "Direction", "Portfolio"};
             for (int index = 0; index < headers.length; index++) {
                 header.createCell(index).setCellValue(headers[index]);
             }
@@ -102,6 +104,7 @@ class ExcelImportTest extends AbstractIntegrationTest {
             row.createCell(7).setCellValue(0.031);
             row.createCell(8).setCellValue(0.041);
             row.createCell(9).setCellValue("BUY");
+            row.createCell(10).setCellValue("BOOK-1");
 
             // Evaluate first so the cached values are persisted next to the formula text.
             workbook.getCreationHelper().createFormulaEvaluator().evaluateAll();

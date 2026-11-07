@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(#{meta.title})}"></head>
+<body>
+<header th:replace="~{fragments/layout :: topbar}"></header>
+<nav th:replace="~{fragments/layout :: nav('meta')}"></nav>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title" th:text="#{meta.title}">字段元信息</h2>
+      <div class="page-sub" th:text="#{meta.subtitle}">枚举字典</div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span th:text="#{meta.sidebar.sets}">集合</span>
+        <button class="icon-btn primary sm" id="btnNewSet" th:title="#{meta.btn.newSet}">
+          <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="M8 3v10M3 8h10"></path>
+          </svg>
+        </button>
+      </div>
+      <div id="setList"></div>
+    </aside>
+
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head">
+          <h3 id="setTitle" th:text="#{meta.panel.placeholder.title}">请选择集合</h3>
+          <div class="row-actions">
+            <button class="icon-btn" id="btnEditSet" disabled th:title="#{meta.btn.editSet}">
+              <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2.5 13.5l.9-3.2 7-7 2.3 2.3-7 7-3.2.9zM10.2 3.6l2.2 2.2"></path>
+              </svg>
+            </button>
+            <button class="icon-btn danger" id="btnDeleteSet" disabled th:title="#{meta.btn.deleteSet}">
+              <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 4.5h10M6.4 4.5V2.9h3.2v1.6M4.6 4.5l.6 8.6h5.6l.6-8.6"></path>
+              </svg>
+            </button>
+            <button class="icon-btn primary" id="btnNewItem" disabled th:title="#{meta.btn.newItem}">
+              <svg class="ico" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                   stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                <path d="M8 3v10M3 8h10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-body" id="setPlaceholder">
+          <div class="muted" th:text="#{meta.panel.placeholder.body}">请选择集合</div>
+        </div>
+
+        <div class="panel-body hidden" id="setMeta"></div>
+
+        <div class="table-wrap hidden" id="setTableWrap">
+          <table class="table-dense">
+            <thead>
+            <tr>
+              <th class="num" th:text="#{common.order}">序号</th>
+              <th th:text="#{meta.column.code}">代码</th>
+              <th th:text="#{meta.column.label}">显示名</th>
+              <th th:text="#{meta.column.refSet}">引用集合</th>
+              <th th:text="#{meta.column.status}">状态</th>
+              <th th:text="#{common.remark}">备注</th>
+              <th th:text="#{common.actions}">操作</th>
+            </tr>
+            </thead>
+            <tbody id="itemRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('meta')}"></th:block>
+</body>
+</html>

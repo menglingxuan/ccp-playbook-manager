@@ -146,7 +146,7 @@ public class OutputScanner {
 
     private String importFile(String tenantId, String taskId, ExternalJobRow job, Path file, String sha) {
         RawTable table = CsvTableReader.read(file, properties.getLimits().getMaxRowsPerSheet());
-        ProductSchema schema = guesser.guess(table);
+        ProductSchema schema = guesser.guess(tenantId, table);
         SheetAnalysis analysis = SheetAnalyzer.analyze(schema, table, PreviewOptions.AUTO,
                 file.getFileName().toString(), properties.getIds().getHashLength(),
                 properties.getIds().isNormalizeFormulaRefs());

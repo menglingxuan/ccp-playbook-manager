@@ -5,8 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import ac.domain.product.FieldDef;
 import ac.domain.product.FieldRole;
 import ac.domain.product.FieldType;
-import ac.domain.product.ProductSchemaFactory;
-import ac.domain.product.products.IrsCase;
+import ac.domain.TestSchemas;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -14,7 +13,7 @@ import org.junit.jupiter.api.Test;
 class SequenceAlignerTest {
 
     private static FieldDef field(String key, String header) {
-        return new FieldDef(key, 1, header, List.of(), FieldType.TEXT, FieldRole.TRADE, false, true, "", "", 1,
+        return FieldDef.of(key, 1, header, List.of(), FieldType.TEXT, FieldRole.BUSINESS, false, true, "", "", 1,
                 Set.of(ac.domain.product.HeaderNormalizer.normalize(header)));
     }
 
@@ -69,7 +68,7 @@ class SequenceAlignerTest {
 
     @Test
     void realIrsHeadersAlignInDeclarationOrder() {
-        var schema = ProductSchemaFactory.create(IrsCase.class);
+        var schema = TestSchemas.irs();
         List<String> headers = List.of("Trade ID", "Trade Date", "Maturity Date", "Notional",
                 "Notional Currency", "Rate", "Rate");
 

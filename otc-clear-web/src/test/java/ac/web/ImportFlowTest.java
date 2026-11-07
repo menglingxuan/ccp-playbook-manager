@@ -23,6 +23,8 @@ class ImportFlowTest extends AbstractIntegrationTest {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String tradeId = "IRS-" + suffix;
         String csv = CSV_TEMPLATE.formatted(tradeId, tradeId);
+        String productCode = productWithFields("MW", "IRS", List.of("tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "floatingRate", "direction"));
 
         var upload = api.upload("/api/uploads", "irs_" + suffix + ".csv",
                 csv.getBytes(StandardCharsets.UTF_8));
@@ -32,7 +34,7 @@ class ImportFlowTest extends AbstractIntegrationTest {
         assertThat(uploadJson.get("sheets")).hasSize(1);
 
         var preview = api.post("/api/uploads/" + uploadId + "/preview",
-                api.toJson(Map.of("sheetIndex", 0, "productCode", "IRS")));
+                api.toJson(Map.of("sheetIndex", 0, "productCode", productCode)));
         assertThat(preview.ok()).as(preview.body()).isTrue();
         JsonNode previewJson = preview.json().get("preview");
         assertThat(previewJson.get("valid").asBoolean()).isTrue();
@@ -47,7 +49,7 @@ class ImportFlowTest extends AbstractIntegrationTest {
         var importResponse = api.post("/api/imports", api.toJson(Map.of(
                 "uploadId", uploadId,
                 "force", false,
-                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", "IRS", "headerRow", 1,
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode, "headerRow", 1,
                         "tradeStartColumn", 3, "dataStartRow", 2)))));
         assertThat(importResponse.ok()).as(importResponse.body()).isTrue();
         JsonNode importJson = importResponse.json();
@@ -79,7 +81,7 @@ class ImportFlowTest extends AbstractIntegrationTest {
             }
         }
         assertThat(tradeSection).isNotNull();
-        assertThat(tradeSection.get("rows")).hasSize(24);
+        assertThat(tradeSection.get("rows")).hasSize(8);
 
         var clonePreview = api.post("/api/clones/preview", api.toJson(Map.of(
                 "caseIds", List.of(caseId), "copies", 2, "template", "{base}-C{seq:02}", "note", "it")));
@@ -129,12 +131,14 @@ class ImportFlowTest extends AbstractIntegrationTest {
     void deletingTaskCascades() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String csv = CSV_TEMPLATE.formatted("DEL-" + suffix, "DEL-" + suffix);
+        String productCode = productWithFields("MW", "IRS", List.of("tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "floatingRate", "direction"));
         var upload = api.upload("/api/uploads", "del_" + suffix + ".csv", csv.getBytes(StandardCharsets.UTF_8));
         String uploadId = upload.json().get("uploadId").asString();
         var importResponse = api.post("/api/imports", api.toJson(Map.of(
                 "uploadId", uploadId,
                 "force", false,
-                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", "IRS")))));
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
         assertThat(importResponse.ok()).as(importResponse.body()).isTrue();
         String batchId = importResponse.json().get("batches").get(0).get("batchId").asString();
         String taskId = importResponse.json().get("taskId").asString();

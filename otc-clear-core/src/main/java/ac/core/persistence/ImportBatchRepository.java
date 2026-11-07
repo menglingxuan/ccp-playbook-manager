@@ -160,6 +160,11 @@ public class ImportBatchRepository {
                 .query(Long.class).single();
     }
 
+    public long countByProduct(String tenantId, String productCode) {
+        return jdbc.sql("SELECT COUNT(*) FROM import_batch WHERE tenant_id = :tenantId AND product_code = :productCode")
+                .param("tenantId", tenantId).param("productCode", productCode).query(Long.class).single();
+    }
+
 
     private ImportBatchRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new ImportBatchRow(

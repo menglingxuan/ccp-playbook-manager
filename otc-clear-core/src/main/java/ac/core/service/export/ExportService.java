@@ -262,7 +262,7 @@ public class ExportService {
         if (productCodes.size() > 1) {
             throw ApiException.invalid("Selected cases must belong to the same product");
         }
-        ProductSchema schema = products.require(productCodes.isEmpty()
+        ProductSchema schema = products.require(tenantId, productCodes.isEmpty()
                 ? batchProduct(tenantId, request) : productCodes.iterator().next());
         return new Selection(schema, records);
     }
@@ -283,7 +283,7 @@ public class ExportService {
             appendSourceOrder(columns, tenantId, request, selection);
             return columns;
         }
-        for (FieldDef field : selection.schema().fields()) {
+        for (FieldDef field : selection.schema().tradeFields()) {
             columns.add(Column.trade(field));
         }
         if (scope == ManagedColumnScope.KNOWN) {
@@ -324,7 +324,7 @@ public class ExportService {
                 return;
             }
         }
-        for (FieldDef field : selection.schema().fields()) {
+        for (FieldDef field : selection.schema().tradeFields()) {
             columns.add(Column.trade(field));
         }
         for (TestCaseRecord record : selection.records()) {

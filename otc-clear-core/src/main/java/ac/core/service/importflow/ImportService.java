@@ -100,7 +100,7 @@ public class ImportService {
                 continue;
             }
             try {
-                ProductSchema schema = products.require(selection.productCode());
+                ProductSchema schema = products.require(tenantId, selection.productCode());
                 RawTable table = previewService.loadFullSheet(tenantId, upload, sheetIndex);
                 PreviewOptions options = new PreviewOptions(selection.headerRowOrAuto(),
                         selection.tradeStartColumnOrAuto(), selection.dataStartRowOrAuto());
@@ -109,6 +109,11 @@ public class ImportService {
                 issues.addAll(analysis.issues());
 
                 if (analysis.layout() == null) {
+                    failedSheets++;
+                    continue;
+                }
+                if (analysis.issues().stream()
+                        .anyMatch(issue -> "STRICT_ORDER_MISMATCH".equals(issue.code()))) {
                     failedSheets++;
                     continue;
                 }

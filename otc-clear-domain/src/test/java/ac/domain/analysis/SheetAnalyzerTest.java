@@ -2,22 +2,19 @@ package ac.domain.analysis;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import ac.domain.TestSchemas;
 import ac.domain.TestTables;
 import ac.domain.casefile.IssueLevel;
 import ac.domain.casefile.ValidationIssue;
 import ac.domain.layout.ColumnKind;
 import ac.domain.product.FieldDef;
-import ac.domain.product.FieldRole;
-import ac.domain.product.ProductDefinition;
-import ac.domain.product.ProductField;
 import ac.domain.product.ProductSchema;
-import ac.domain.product.ProductSchemaFactory;
 import ac.domain.table.RawTable;
 import org.junit.jupiter.api.Test;
 
 class SheetAnalyzerTest {
 
-    private static final ProductSchema SCHEMA = ProductSchemaFactory.create(AnalyzedProduct.class);
+    private static final ProductSchema SCHEMA = TestSchemas.analyzed();
 
     private static RawTable table() {
         return TestTables.table("Sheet1",
@@ -107,14 +104,5 @@ class SheetAnalyzerTest {
         assertThat(preview.valid()).isFalse();
         assertThat(preview.issues()).filteredOn(issue -> issue.level() == IssueLevel.ERROR)
                 .extracting(ValidationIssue::fieldKey).contains("tradeId");
-    }
-
-    @ProductDefinition(code = "AN", name = "Analyzed")
-    @ProductField(key = "tradeId", order = 1, header = "Trade ID", role = FieldRole.KEY, required = true)
-    @ProductField(key = "tradeDate", order = 2, header = "Trade Date", type = ac.domain.product.FieldType.DATE,
-            required = true)
-    @ProductField(key = "notional", order = 3, header = "Notional",
-            type = ac.domain.product.FieldType.DECIMAL, required = true)
-    static class AnalyzedProduct {
     }
 }

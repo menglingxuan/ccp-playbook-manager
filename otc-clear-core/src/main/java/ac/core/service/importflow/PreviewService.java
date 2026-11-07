@@ -50,7 +50,7 @@ public class PreviewService {
             throw ApiException.invalid("Sheet index " + sheetIndex + " does not exist");
         }
         RawTable table = loadPreviewSheet(upload, sheetIndex);
-        ProductSchema schema = resolveSchema(request.productCode(), table);
+        ProductSchema schema = resolveSchema(tenantId, request.productCode(), table);
 
         PreviewOptions options = new PreviewOptions(
                 value(request.headerRow()),
@@ -120,11 +120,11 @@ public class PreviewService {
         return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 
-    private ProductSchema resolveSchema(String requestedCode, RawTable table) {
+    private ProductSchema resolveSchema(String tenantId, String requestedCode, RawTable table) {
         if (requestedCode != null && !requestedCode.isBlank()) {
-            return products.require(requestedCode);
+            return products.require(tenantId, requestedCode);
         }
-        return guesser.guess(table);
+        return guesser.guess(tenantId, table);
     }
 
     private static int value(Integer number) {
@@ -137,7 +137,7 @@ public class PreviewService {
     }
 
     /** Field definition lookup used by the wizard to render type hints. */
-    public List<FieldDef> fields(String productCode) {
-        return products.require(productCode).fields();
+    public List<FieldDef> fields(String tenantId, String productCode) {
+        return products.require(tenantId, productCode).fields();
     }
 }

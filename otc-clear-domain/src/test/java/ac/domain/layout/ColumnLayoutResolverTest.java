@@ -2,14 +2,12 @@ package ac.domain.layout;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import ac.domain.TestSchemas;
 import ac.domain.TestTables;
 import ac.domain.product.FieldDef;
 import ac.domain.product.FieldRole;
 import ac.domain.product.FieldType;
-import ac.domain.product.ProductDefinition;
-import ac.domain.product.ProductField;
 import ac.domain.product.ProductSchema;
-import ac.domain.product.ProductSchemaFactory;
 import ac.domain.table.RawTable;
 import java.util.List;
 import java.util.Set;
@@ -17,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 class ColumnLayoutResolverTest {
 
-    private static final ProductSchema SCHEMA = ProductSchemaFactory.create(SmallProduct.class);
+    private static final ProductSchema SCHEMA = TestSchemas.small();
 
     @Test
     void splitsManagedColumnsOnBothSides() {
@@ -51,7 +49,7 @@ class ColumnLayoutResolverTest {
 
     @Test
     void duplicateHeadersMapInDeclarationOrder() {
-        ProductSchema schema = ProductSchemaFactory.create(DuplicateRateProduct.class);
+        ProductSchema schema = TestSchemas.duplicateRate();
         RawTable table = TestTables.table("Sheet1",
                 new String[] {"Trade ID", "Rate", "Rate"},
                 new String[] {"T-1", "0.01", "0.02"});
@@ -103,26 +101,12 @@ class ColumnLayoutResolverTest {
 
     @Test
     void alignsFieldsAfterFuzzyHeaderMatch() {
-        FieldDef field = new FieldDef("notionalAmount", 1, "Notional Amount", List.of(), FieldType.DECIMAL,
-                FieldRole.TRADE, false, true, "", "", 1, Set.of("notionalamount"));
+        FieldDef field = FieldDef.of("notionalAmount", 1, "Notional Amount", List.of(), FieldType.DECIMAL,
+                FieldRole.BUSINESS, false, true, "", "", 1, Set.of("notionalamount"));
         SequenceAligner.Match match = SequenceAligner.align(List.of("Notionl Amount"), List.of(field))
                 .matches().get(0);
 
         assertThat(match.fieldKey()).isEqualTo("notionalAmount");
         assertThat(match.score()).isEqualTo(SequenceAligner.SCORE_FUZZY);
-    }
-
-    @ProductDefinition(code = "SMALL", name = "Small")
-    @ProductField(key = "a", order = 1, header = "A")
-    @ProductField(key = "b", order = 2, header = "B")
-    @ProductField(key = "c", order = 3, header = "C")
-    static class SmallProduct {
-    }
-
-    @ProductDefinition(code = "DUP", name = "Duplicate rate")
-    @ProductField(key = "tradeId", order = 1, header = "Trade ID", role = FieldRole.KEY)
-    @ProductField(key = "fixedRate", order = 2, header = "Rate")
-    @ProductField(key = "floatingRate", order = 3, header = "Rate")
-    static class DuplicateRateProduct {
     }
 }

@@ -202,6 +202,11 @@ public class TestCaseRepository {
                 .param("tenantId", tenantId).param("origin", origin).query(Long.class).single();
     }
 
+    public long countByProduct(String tenantId, String productCode) {
+        return jdbc.sql("SELECT COUNT(*) FROM test_case WHERE tenant_id = :tenantId AND product_code = :productCode")
+                .param("tenantId", tenantId).param("productCode", productCode).query(Long.class).single();
+    }
+
     private void appendFilters(StringBuilder sql, Map<String, Object> params, CaseFilter filter) {
         sql.append(" AND c.status = 'ACTIVE'");
         if (filter.batchId() != null && !filter.batchId().isBlank()) {

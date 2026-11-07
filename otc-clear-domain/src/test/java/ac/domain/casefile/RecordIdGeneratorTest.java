@@ -3,8 +3,7 @@ package ac.domain.casefile;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import ac.domain.product.ProductSchema;
-import ac.domain.product.ProductSchemaFactory;
-import ac.domain.product.products.IrsCase;
+import ac.domain.TestSchemas;
 import ac.domain.product.FieldCodec;
 import java.math.BigDecimal;
 import java.util.Map;
@@ -12,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 class RecordIdGeneratorTest {
 
-    private static final ProductSchema SCHEMA = ProductSchemaFactory.create(IrsCase.class);
+    private static final ProductSchema SCHEMA = TestSchemas.irs();
 
     @Test
     void originalIdIsDeterministic() {

@@ -29,8 +29,8 @@ public final class SampleWorkbookGenerator {
     public static final int CSV_ROW_COUNT = 100;
     /** Number of columns in the wide worksheet. */
     public static final int WIDE_COLUMN_COUNT = 70;
-    /** Number of columns in the wide CSV. */
-    public static final int CSV_COLUMN_COUNT = 30;
+    /** Number of columns in the wide CSV: 4 managed columns plus the 66 CCSIRS trade columns. */
+    public static final int CSV_COLUMN_COUNT = 70;
     /** Logical name of the wide worksheet. */
     public static final String WIDE_SHEET_NAME = "IRS_Wide";
     /** File name of the wide CCSIRS CSV. */
@@ -53,17 +53,19 @@ public final class SampleWorkbookGenerator {
     private static final String[] AMORTIZATION = {"NONE", "LINEAR", "CUSTOM"};
     private static final String[] BOOKING_SYSTEMS = {"MWIRE", "SUMMIT", "MANUAL"};
 
+    /** IRS sample: two managed columns, the complete 24 business columns and one unmapped column. */
     private static final String IRS_CSV = """
-            _TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction,Extra Ref
-            TC-IRS-0001,imported from csv,IRS-1001,2026-01-05,2031-01-05,"1,500,000.00",USD,0.0325,0.0425,BUY,REF-A
-            TC-IRS-0002,imported from csv,IRS-1002,2026-02-10,2031-02-10,2000000,EUR,0.0250,0.0350,SELL,REF-B
-            TC-IRS-0003,imported from csv,IRS-1003,2026-03-15,2031-03-15,750000,GBP,0.0180,0.0280,BUY,REF-C
+            _TestCaseId,_Remarks,Trade ID,Trade Date,Effective Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Fixed Frequency,Floating Frequency,Day Count,BDC,Calendar,Clearing House,Clearing Member,Account,Counterparty,Direction,UPI,Reporting Party,Trade State,Novation Date,Portfolio,US Person,Extra Ref
+            TC-IRS-0001,imported from csv,IRS-1001,2026-01-05,2026-01-07,2031-01-05,"1,500,000.00",USD,0.0325,0.0425,ANNUAL,SEMI,ACT/360,MODIFIED FOLLOWING,TARGET,HKEX OTC CLEAR,CM-001,ACC-10001,CP-001,BUY,UPI-1001,PARTY-A,CLEARED,2026-01-12,PF-01,N,REF-A
+            TC-IRS-0002,imported from csv,IRS-1002,2026-02-10,2026-02-12,2031-02-10,2000000,EUR,0.0250,0.0350,ANNUAL,QUARTERLY,ACT/360,MODIFIED FOLLOWING,TARGET,HKEX OTC CLEAR,CM-002,ACC-10002,CP-002,SELL,UPI-1002,PARTY-B,CLEARED,2026-02-17,PF-02,Y,REF-B
+            TC-IRS-0003,imported from csv,IRS-1003,2026-03-15,2026-03-17,2031-03-15,750000,GBP,0.0180,0.0280,SEMI,SEMI,ACT/365,MODIFIED FOLLOWING,LONDON,HKEX OTC CLEAR,CM-003,ACC-10003,CP-003,BUY,UPI-1003,PARTY-A,CLEARED,2026-03-20,PF-03,N,REF-C
             """;
 
+    /** OIS sample: no managed column, the complete 20 business columns. */
     private static final String OIS_CSV = """
-            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Compounding,Payment Frequency,Day Count,BDC,Direction
-            OIS-2001,2026-01-06,2027-01-06,5000000,USD,0.04125,DAILY,ANNUAL,ACT/360,MODIFIED FOLLOWING,BUY
-            OIS-2002,2026-02-07,2027-02-07,3000000,EUR,0.03250,DAILY,ANNUAL,ACT/360,MODIFIED FOLLOWING,SELL
+            Trade ID,Trade Date,Effective Date,Maturity Date,Notional,Notional Currency,Rate,Compounding,Payment Frequency,Day Count,BDC,Calendar,Clearing House,Clearing Member,Account,Counterparty,Direction,UPI,Trade State,Portfolio
+            OIS-2001,2026-01-06,2026-01-08,2027-01-06,5000000,USD,0.04125,DAILY,ANNUAL,ACT/360,MODIFIED FOLLOWING,TARGET,HKEX OTC CLEAR,CM-001,ACC-20001,CP-001,BUY,UPI-2001,CLEARED,PF-01
+            OIS-2002,2026-02-07,2026-02-09,2027-02-07,3000000,EUR,0.03250,DAILY,ANNUAL,ACT/360,MODIFIED FOLLOWING,TARGET,HKEX OTC CLEAR,CM-002,ACC-20002,CP-002,SELL,UPI-2002,CLEARED,PF-02
             """;
 
     /** Management columns placed left of the IRS trade block. */
@@ -86,18 +88,24 @@ public final class SampleWorkbookGenerator {
             "Amortization", "Step-up", "Cap", "Floor", "Knock-out", "Barrier", "Notes 2", "Notes 3",
             "Notional Check", "Audit Trail Ref"};
 
-    /** CCSIRS management columns placed left of the trade block in the wide CSV. */
-    private static final String[] CSV_LEFT_MANAGED = {"_TestCaseId", "_Remarks"};
+    /** CCSIRS management columns placed left of the trade block. */
+    private static final String[] CSV_LEFT_MANAGED = {"_TestCaseId", "_Remarks", "Scenario Group", "Priority"};
 
-    /** CCSIRS trade columns in schema order; "Rate" appears twice on purpose. */
+    /** CCSIRS trade columns in schema order; the first 50 columns are the required ones. */
     private static final String[] CSV_TRADE_HEADERS = {
             "Trade ID", "Trade Date", "Effective Date", "Maturity Date", "Notional", "Notional Currency",
-            "Notional 2", "Notional Currency 2", "Rate", "Rate", "Basis Spread", "Fixed Frequency",
-            "Floating Frequency", "Day Count", "BDC", "Calendar", "Reset Calendar", "Clearing House",
-            "Clearing Member", "Account", "Counterparty", "Direction", "UPI", "Trade State"};
-
-    /** Extra management columns placed right of the trade block in the wide CSV. */
-    private static final String[] CSV_RIGHT_MANAGED = {"_Reviewer", "_Priority", "Env", "Scenario"};
+            "Notional 2", "Notional Currency 2", "Direction", "Fixed Rate", "Floating Rate", "Basis Spread",
+            "Fixed Frequency", "Floating Frequency", "Fixed Day Count", "Floating Day Count",
+            "Payment Calendar", "Reset Calendar", "Payment BDC", "Reset BDC", "Trade State",
+            "Clearing House", "Clearing Member", "Account", "Counterparty", "Counterparty LEI",
+            "Reporting Party", "UPI", "UTI", "Portfolio", "Trade Type", "Product", "Swap Sub Type",
+            "Settlement Currency", "Settlement Date", "Fixed Leg Payer", "Floating Leg Payer",
+            "Fixed Leg Notional", "Floating Leg Notional", "Initial Exchange Rate", "Final Exchange Rate",
+            "Exchange Rate Source", "Valuation Date", "Collateral Type", "Margin Agreement",
+            "Booking System", "Execution Venue", "Confirmation Method", "Reportable", "US Person",
+            "Termination Date", "Novation Date", "Compression Date", "Amendment Date", "Platform",
+            "Broker", "Trader", "Sales Person", "Strategy", "Hedge Type", "Risk Class", "Comment",
+            "External Reference", "Settlement Method", "Netting Set", "Regulatory Regime"};
 
     private SampleWorkbookGenerator() {
     }
@@ -262,11 +270,7 @@ public final class SampleWorkbookGenerator {
         row.createCell(column++).setCellValue(String.format(Locale.ROOT, "UPI-%06d", index));
         row.createCell(column++).setCellValue(index % 3 == 0 ? "PARTY-B" : "PARTY-A");
         row.createCell(column++).setCellValue("CLEARED");
-        if (index % 10 == 0) {
-            setDate(row.createCell(column++), tradeDate.plusDays(7), dateStyle);
-        } else {
-            row.createCell(column++).setCellValue("");
-        }
+        setDate(row.createCell(column++), tradeDate.plusDays(7), dateStyle);
         row.createCell(column++).setCellValue(String.format(Locale.ROOT, "PF-%02d", 1 + index % 8));
         row.createCell(column++).setCellValue(index % 4 == 0 ? "Y" : "N");
 
@@ -315,53 +319,102 @@ public final class SampleWorkbookGenerator {
         row.createCell(column).setCellValue(String.format(Locale.ROOT, "AUD-%06d", index));
     }
 
-    /** Builds the 30 column x 100 row CCSIRS CSV with two management columns on each side. */
+    /**
+     * Builds the 70 column x 100 row CCSIRS CSV: 4 management columns followed by the complete
+     * 66 column trade block, so every seeded CCSIRS field has a value.
+     */
     private static String wideCsv() {
-        StringBuilder sb = new StringBuilder(128 * 1024);
-        appendCsvLine(sb, concat(CSV_LEFT_MANAGED, CSV_TRADE_HEADERS, CSV_RIGHT_MANAGED));
+        StringBuilder sb = new StringBuilder(256 * 1024);
+        appendCsvLine(sb, concat(CSV_LEFT_MANAGED, CSV_TRADE_HEADERS));
         for (int index = 1; index <= CSV_ROW_COUNT; index++) {
-            LocalDate tradeDate = BASE_DATE.plusDays(index);
-            String currency = CURRENCIES[(index - 1) % CURRENCIES.length];
-            String currency2 = CURRENCIES[index % CURRENCIES.length];
-            String notional = String.format(Locale.ROOT, "%d.00", 2_000_000L + index * 25_000L);
-            String notional2 = String.format(Locale.ROOT, "%d.00", 1_600_000L + index * 20_000L);
-            String fixedRate = String.format(Locale.ROOT, "%.6f", 0.015 + index * 0.00004);
-            String floatingRate = String.format(Locale.ROOT, "%.6f", 0.025 + index * 0.00004);
-            String basisSpread = String.format(Locale.ROOT, "%.6f", 0.0005 + index * 0.000002);
-
-            appendCsvLine(sb, new String[] {
-                    String.format(Locale.ROOT, "TC-CCS-%04d", index),
-                    "wide csv row " + index,
-                    String.format(Locale.ROOT, "CCS-W-%04d", index),
-                    tradeDate.toString(),
-                    tradeDate.plusDays(2).toString(),
-                    tradeDate.plusYears(10).toString(),
-                    notional,
-                    currency,
-                    notional2,
-                    currency2,
-                    fixedRate,
-                    floatingRate,
-                    basisSpread,
-                    FREQUENCIES[(index - 1) % FREQUENCIES.length],
-                    FLOAT_FREQUENCIES[(index - 1) % FLOAT_FREQUENCIES.length],
-                    "ACT/360",
-                    "MODIFIED FOLLOWING",
-                    "TARGET",
-                    "TARGET",
-                    "HKEX OTC CLEAR",
-                    String.format(Locale.ROOT, "CM-%03d", 1 + index % 12),
-                    String.format(Locale.ROOT, "ACC-%05d", 20000 + index),
-                    String.format(Locale.ROOT, "CP-%03d", 1 + index % 40),
-                    index % 2 == 0 ? "SELL" : "BUY",
-                    String.format(Locale.ROOT, "UPI-CCS-%06d", index),
-                    "CLEARED",
-                    String.format(Locale.ROOT, "REVIEWER%02d", 1 + index % 6),
-                    "P" + (1 + index % 3),
-                    "UAT",
-                    SCENARIOS[(index - 1) % SCENARIOS.length]});
+            appendCsvLine(sb, csvRow(index));
         }
         return sb.toString();
+    }
+
+    private static String[] csvRow(int index) {
+        LocalDate tradeDate = BASE_DATE.plusDays(index);
+        String currency = CURRENCIES[(index - 1) % CURRENCIES.length];
+        String currency2 = CURRENCIES[index % CURRENCIES.length];
+        String notional = String.format(Locale.ROOT, "%d.00", 2_000_000L + index * 25_000L);
+        String notional2 = String.format(Locale.ROOT, "%d.00", 1_600_000L + index * 20_000L);
+        String fixedRate = String.format(Locale.ROOT, "%.6f", 0.015 + index * 0.00004);
+        String floatingRate = String.format(Locale.ROOT, "%.6f", 0.025 + index * 0.00004);
+        String basisSpread = String.format(Locale.ROOT, "%.6f", 0.0005 + index * 0.000002);
+        String counterparty = String.format(Locale.ROOT, "CP-%03d", 1 + index % 40);
+        String exchangeRate = String.format(Locale.ROOT, "%.6f", 7.7500 + (index % 100) * 0.0015);
+
+        return new String[] {
+                String.format(Locale.ROOT, "TC-CCS-%04d", index),
+                "wide csv row " + index,
+                SCENARIOS[(index - 1) % SCENARIOS.length],
+                "P" + (1 + index % 3),
+                String.format(Locale.ROOT, "CCS-W-%04d", index),
+                tradeDate.toString(),
+                tradeDate.plusDays(2).toString(),
+                tradeDate.plusYears(10).toString(),
+                notional,
+                currency,
+                notional2,
+                currency2,
+                index % 2 == 0 ? "SELL" : "BUY",
+                fixedRate,
+                floatingRate,
+                basisSpread,
+                FREQUENCIES[(index - 1) % FREQUENCIES.length],
+                FLOAT_FREQUENCIES[(index - 1) % FLOAT_FREQUENCIES.length],
+                "ACT/360",
+                "ACT/365",
+                "TARGET",
+                "TARGET,NY",
+                "MODIFIED FOLLOWING",
+                "MODIFIED FOLLOWING",
+                "CLEARED",
+                "HKEX OTC CLEAR",
+                String.format(Locale.ROOT, "CM-%03d", 1 + index % 12),
+                String.format(Locale.ROOT, "ACC-%05d", 20000 + index),
+                counterparty,
+                String.format(Locale.ROOT, "LEI%016d", 5_000_000L + index),
+                index % 3 == 0 ? "PARTY-B" : "PARTY-A",
+                String.format(Locale.ROOT, "UPI-CCS-%06d", index),
+                String.format(Locale.ROOT, "UTI-%012d", 700_000L + index),
+                String.format(Locale.ROOT, "PF-%02d", 1 + index % 8),
+                "CROSS CURRENCY SWAP",
+                "CCSIRS",
+                "FIXED FLOAT",
+                currency,
+                tradeDate.plusDays(2).toString(),
+                "PARTY-A",
+                "PARTY-B",
+                notional,
+                notional2,
+                exchangeRate,
+                exchangeRate,
+                "REUTERS",
+                tradeDate.toString(),
+                "CASH",
+                index % 2 == 0 ? "VM+IM" : "VM",
+                BOOKING_SYSTEMS[index % BOOKING_SYSTEMS.length],
+                VENUES[(index - 1) % VENUES.length],
+                index % 4 == 0 ? "MANUAL" : "ELECTRONIC",
+                "Y",
+                index % 5 == 0 ? "Y" : "N",
+                tradeDate.plusYears(5).toString(),
+                tradeDate.plusDays(30).toString(),
+                tradeDate.plusDays(45).toString(),
+                tradeDate.plusDays(60).toString(),
+                "MW",
+                String.format(Locale.ROOT, "BROKER-%02d", 1 + index % 6),
+                String.format(Locale.ROOT, "TRADER%02d", 1 + index % 15),
+                String.format(Locale.ROOT, "SALES%02d", 1 + index % 9),
+                STRATEGIES[(index - 1) % STRATEGIES.length],
+                index % 2 == 0 ? "HEDGE" : "PROP",
+                "RATES",
+                String.format(Locale.ROOT, "auto generated row %04d", index),
+                String.format(Locale.ROOT, "EXT-%06d", index),
+                index % 3 == 0 ? "PHYSICAL" : "NET",
+                String.format(Locale.ROOT, "NS-%03d", 1 + index % 20),
+                REGIMES[(index - 1) % REGIMES.length]};
     }
 
     private static void appendCsvLine(StringBuilder sb, String[] values) {
@@ -381,6 +434,13 @@ public final class SampleWorkbookGenerator {
             return text;
         }
         return '"' + text.replace("\"", "\"\"") + '"';
+    }
+
+    private static String[] concat(String[] first, String[] second) {
+        String[] all = new String[first.length + second.length];
+        System.arraycopy(first, 0, all, 0, first.length);
+        System.arraycopy(second, 0, all, first.length, second.length);
+        return all;
     }
 
     private static String[] concat(String[] first, String[] second, String[] third) {

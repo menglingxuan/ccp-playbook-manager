@@ -66,12 +66,14 @@ class ExternalJobFlowTest extends AbstractIntegrationTest {
     void dispatchesScansAndBrowsesOutputs() throws IOException {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String tradeId = "EXT-" + suffix;
+        String productCode = productWithFields("MW", "IRS", List.of("tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "floatingRate", "direction"));
         var upload = api.upload("/api/uploads", "ext_" + suffix + ".csv",
                 CSV.formatted(tradeId).getBytes(StandardCharsets.UTF_8));
         String uploadId = upload.json().get("uploadId").asString();
         var importResponse = api.post("/api/imports", api.toJson(Map.of(
                 "uploadId", uploadId, "force", false,
-                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", "IRS")))));
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
         assertThat(importResponse.ok()).as(importResponse.body()).isTrue();
         String batchId = importResponse.json().get("batches").get(0).get("batchId").asString();
         var cases = api.get("/api/batches/" + batchId + "/cases?page=1&size=10");

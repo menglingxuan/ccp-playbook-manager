@@ -135,7 +135,7 @@ public class CloneService {
         if (productCodes.size() != 1) {
             throw ApiException.invalid("Selected cases must belong to the same product");
         }
-        ProductSchema schema = products.require(productCodes.iterator().next());
+        ProductSchema schema = products.require(tenantId, productCodes.iterator().next());
         FieldDef keyField = schema.uniqueField();
         if (keyField == null) {
             throw ApiException.invalid("Product " + schema.code() + " has no unique field to rewrite");

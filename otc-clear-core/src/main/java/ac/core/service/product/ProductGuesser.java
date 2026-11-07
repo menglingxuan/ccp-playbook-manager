@@ -18,8 +18,8 @@ public class ProductGuesser {
         this.products = products;
     }
 
-    public ProductSchema guess(RawTable table) {
-        List<ProductSchema> candidates = new ArrayList<>(products.all());
+    public ProductSchema guess(String tenantId, RawTable table) {
+        List<ProductSchema> candidates = new ArrayList<>(products.all(tenantId));
         ProductSchema best = null;
         int bestScore = -1;
         for (ProductSchema candidate : candidates) {
@@ -30,12 +30,12 @@ public class ProductGuesser {
             int startColumn = SheetDetector.detectTradeStartColumn(candidate, table, headerRow);
             List<String> headers = table.headerTexts(headerRow - 1);
             int from = Math.max(0, startColumn - 1);
-            int to = Math.min(headers.size(), from + candidate.fields().size());
+            int to = Math.min(headers.size(), from + candidate.tradeFields().size());
             if (to <= from) {
                 continue;
             }
             SequenceAligner.Alignment alignment = SequenceAligner.align(headers.subList(from, to),
-                    candidate.fields());
+                    candidate.tradeFields());
             int score = alignment.matchCount() * 10 + (int) alignment.score();
             if (score > bestScore) {
                 bestScore = score;

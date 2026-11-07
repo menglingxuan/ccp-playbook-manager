@@ -55,6 +55,7 @@ spring:
   jackson:
     deserialization:
       use-big-decimal-for-floats: true
+      fail-on-null-for-primitives: false
   datasource:
     hikari:
       maximum-pool-size: 8

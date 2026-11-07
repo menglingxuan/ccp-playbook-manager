@@ -35,12 +35,27 @@ public final class FieldCodec {
             return null;
         }
         return switch (field.type()) {
-            case TEXT, ENUM -> text;
+            case TEXT -> text;
+            case ENUM -> parseEnumeration(field, text);
             case INTEGER -> parseInteger(field, text);
             case DECIMAL -> parseDecimal(field, text);
             case DATE -> parseDate(field, text);
             case BOOLEAN -> parseBoolean(field, text);
         };
+    }
+
+    /** Enumerated values must match one of the allowed labels (case-insensitive). */
+    private static Object parseEnumeration(FieldDef field, String text) {
+        if (!field.isEnumerated()) {
+            return text;
+        }
+        for (String allowed : field.enumValues()) {
+            if (allowed.equalsIgnoreCase(text)) {
+                return allowed;
+            }
+        }
+        throw new FieldFormatException(field.key(), text,
+                "Value '" + text + "' is not one of " + String.join("/", field.enumValues()));
     }
 
     public static String format(FieldDef field, Object value) {

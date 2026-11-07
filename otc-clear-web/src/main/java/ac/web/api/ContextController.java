@@ -54,6 +54,6 @@ public class ContextController {
                         properties.getLimits().getMaxBulkDelete(),
                         properties.getLimits().getMaxRowsPerSheet()),
                 exportDefaults,
-                products.all().stream().map(ProductView::of).toList());
+                products.all(tenantId).stream().map(ProductView::of).toList());
     }
 }

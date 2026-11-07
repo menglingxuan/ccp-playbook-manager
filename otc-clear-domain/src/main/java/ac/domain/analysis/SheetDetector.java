@@ -45,7 +45,7 @@ public final class SheetDetector {
             if (header.isBlank()) {
                 continue;
             }
-            for (FieldDef field : schema.fields()) {
+            for (FieldDef field : schema.tradeFields()) {
                 if (SequenceAligner.matchScore(header, field) >= SequenceAligner.SCORE_ALIAS) {
                     return column + 1;
                 }
@@ -63,7 +63,7 @@ public final class SheetDetector {
             }
             FieldDef bestField = null;
             int bestScore = 0;
-            for (FieldDef field : schema.fields()) {
+            for (FieldDef field : schema.tradeFields()) {
                 int score = SequenceAligner.matchScore(header, field);
                 if (score > bestScore) {
                     bestScore = score;

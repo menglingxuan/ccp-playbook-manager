@@ -57,7 +57,8 @@ public class CaseService {
         List<CaseSummary> items = new ArrayList<>(records.size());
         Map<String, ProductSchema> schemas = new LinkedHashMap<>();
         for (TestCaseRecord record : records) {
-            ProductSchema schema = schemas.computeIfAbsent(record.productCode(), products::require);
+            ProductSchema schema = schemas.computeIfAbsent(record.productCode(),
+                    code -> products.require(tenantId, code));
             items.add(toSummary(record, schema));
         }
         return new PageResult<>(items, filter.page().page(), filter.page().size(), total);
@@ -97,7 +98,7 @@ public class CaseService {
 
     public VerticalView vertical(String tenantId, String caseId) {
         TestCaseRecord record = require(tenantId, caseId);
-        ProductSchema schema = products.require(record.productCode());
+        ProductSchema schema = products.require(tenantId, record.productCode());
         Map<String, Object> data = json.toMap(record.dataJson());
         Map<String, String> managed = toStringMap(json.toMapOrEmpty(record.managedJson()));
         Map<String, String> extras = toStringMap(json.toMapOrEmpty(record.extrasJson()));
@@ -115,7 +116,7 @@ public class CaseService {
                 record.sourceRow() == null ? "" : record.sourceRow().toString(), null, "INTEGER", false));
 
         List<VerticalView.VerticalRow> trade = new ArrayList<>();
-        for (FieldDef field : schema.fields()) {
+        for (FieldDef field : schema.tradeFields()) {
             trade.add(new VerticalView.VerticalRow(field.key(), field.displayHeader(),
                     codec.displayValue(schema, field.key(), data.get(field.key())),
                     formulas.get(field.key()), field.type().name(), field.isKey()));
@@ -146,7 +147,7 @@ public class CaseService {
     @Transactional
     public CaseDetail update(String tenantId, String caseId, UpdateCaseRequest request) {
         TestCaseRecord record = require(tenantId, caseId);
-        ProductSchema schema = products.require(record.productCode());
+        ProductSchema schema = products.require(tenantId, record.productCode());
         CaseValidator.CaseValidation validation = CaseValidator.validate(schema, request.values());
         if (!validation.valid()) {
             throw new ApiException(ErrorCode.INVALID_REQUEST, "Some values are invalid",
@@ -214,7 +215,7 @@ public class CaseService {
         Map<String, Object> data = json.toMap(record.dataJson());
         Map<String, String> formulas = codec.tradeFormulas(record.formulaJson());
         List<CaseSummary.PreviewField> preview = new ArrayList<>();
-        for (FieldDef field : schema.fields()) {
+        for (FieldDef field : schema.tradeFields()) {
             if (preview.size() >= PREVIEW_FIELDS) {
                 break;
             }
@@ -232,7 +233,7 @@ public class CaseService {
         StringBuilder sb = new StringBuilder();
         append(sb, testCaseId);
         append(sb, keyValue);
-        for (FieldDef field : schema.fields()) {
+        for (FieldDef field : schema.tradeFields()) {
             Object value = data.get(field.key());
             if (value != null) {
                 append(sb, codec.displayValue(schema, field.key(), value));
@@ -264,8 +265,8 @@ public class CaseService {
     }
 
     /** Re-validates stored values, used by export prechecks. */
-    public List<ValidationIssue> validate(TestCaseRecord record) {
-        ProductSchema schema = products.require(record.productCode());
+    public List<ValidationIssue> validate(String tenantId, TestCaseRecord record) {
+        ProductSchema schema = products.require(tenantId, record.productCode());
         Map<String, Object> data = json.toMap(record.dataJson());
         Map<String, String> raw = new LinkedHashMap<>();
         data.forEach((key, value) -> raw.put(key, value == null ? "" : String.valueOf(value)));

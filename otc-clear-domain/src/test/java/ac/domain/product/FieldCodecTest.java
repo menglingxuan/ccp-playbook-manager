@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 class FieldCodecTest {
 
     private static FieldDef field(FieldType type) {
-        return new FieldDef("value", 1, "Value", java.util.List.of(), type, FieldRole.TRADE, false, true,
+        return FieldDef.of("value", 1, "Value", java.util.List.of(), type, FieldRole.BUSINESS, false, true,
                 "", "", 1, java.util.Set.of("value"));
     }
 
@@ -57,5 +57,25 @@ class FieldCodecTest {
     void booleanAcceptsCommonSpellings() {
         assertThat(FieldCodec.parse(field(FieldType.BOOLEAN), "Y")).isEqualTo(Boolean.TRUE);
         assertThat(FieldCodec.parse(field(FieldType.BOOLEAN), "no")).isEqualTo(Boolean.FALSE);
+    }
+
+    @Test
+    void enumeratedValuesAreValidatedAgainstAllowedLabels() {
+        FieldDef enumField = new FieldDef("convention", 1, "Conversion Method", java.util.List.of(),
+                FieldType.ENUM, FieldRole.BUSINESS, false, true, false, "", "", 1, java.util.Set.of(),
+                java.util.List.of("FIELD_TAG"), java.util.List.of("Modified Following", "Flowing", "Preceding"));
+
+        assertThat(FieldCodec.parse(enumField, "flowing")).isEqualTo("Flowing");
+        assertThatThrownBy(() -> FieldCodec.parse(enumField, "Unknown"))
+                .isInstanceOf(FieldFormatException.class)
+                .hasMessageContaining("Modified Following/Flowing/Preceding");
+    }
+
+    @Test
+    void enumeratedFieldWithoutAllowedValuesAcceptsAnyText() {
+        FieldDef enumField = FieldDef.of("convention", 1, "Conversion Method", java.util.List.of(),
+                FieldType.ENUM, FieldRole.BUSINESS, false, true, "", "", 1, java.util.Set.of());
+
+        assertThat(FieldCodec.parse(enumField, "Anything")).isEqualTo("Anything");
     }
 }

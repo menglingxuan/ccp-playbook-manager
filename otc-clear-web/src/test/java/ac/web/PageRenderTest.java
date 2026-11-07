@@ -9,7 +9,7 @@ class PageRenderTest extends AbstractIntegrationTest {
 
     @Test
     void pagesRender() {
-        String[] paths = {"/", "/import", "/products", "/about", "/outputs", "/external-jobs"};
+        String[] paths = {"/", "/import", "/products", "/meta", "/about", "/outputs", "/external-jobs"};
         for (String path : paths) {
             var response = api.get(path);
             assertThat(response.status()).as(path + " -> " + response.body()).isEqualTo(200);
@@ -36,7 +36,7 @@ class PageRenderTest extends AbstractIntegrationTest {
         var response = api.get("/api/products/IRS");
         assertThat(response.ok()).isTrue();
         String body = response.body();
-        assertThat(body).contains("\"displayHeader\":\"Rate (#2)\"");
+        assertThat(body).contains("\"header\":\"Rate\"");
         assertThat(body).contains("\"duplicate\":true");
     }
 }

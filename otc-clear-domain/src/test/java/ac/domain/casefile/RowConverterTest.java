@@ -5,9 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import ac.domain.TestTables;
 import ac.domain.layout.ColumnLayoutResolver;
 import ac.domain.layout.SheetLayout;
+import ac.domain.TestSchemas;
 import ac.domain.product.ProductSchema;
-import ac.domain.product.ProductSchemaFactory;
-import ac.domain.product.products.IrsCase;
 import ac.domain.table.RawRow;
 import ac.domain.table.RawTable;
 import java.math.BigDecimal;
@@ -18,7 +17,7 @@ import org.junit.jupiter.api.Test;
 
 class RowConverterTest {
 
-    private static final ProductSchema SCHEMA = ProductSchemaFactory.create(IrsCase.class);
+    private static final ProductSchema SCHEMA = TestSchemas.irs();
     private static final String[] HEADER = {"_TestCaseId", "_Remarks", "Trade ID", "Trade Date", "Bogus",
             "Maturity Date", "Notional", "Notional Currency", "Rate", "Rate", "Direction", "Trailing"};
 
