@@ -194,8 +194,9 @@ th.sortable:hover { color: var(--accent); }
 .dropzone strong { display: block; font-size: 15px; color: var(--text); margin-bottom: 6px; }
 .params { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.field input, .field select { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 13px; }
-.field input:focus, .field select:focus { border-color: var(--accent); outline: none; }
+.field input, .field select, .field textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 13px; }
+.field textarea { resize: vertical; min-height: 54px; line-height: 1.5; font-family: inherit; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); outline: none; }
 .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .legend span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
 .legend .trade::before { background: var(--accent-bg); border: 1px solid var(--accent); }
@@ -341,8 +342,7 @@ th.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: -2p
 .filter-clear-all:hover { background: var(--accent-bg); text-decoration: underline; }
 
 /* ---------- long text cell + floating panel ---------- */
-.cell-text { font-size: 12.5px; overflow-wrap: anywhere; }
-.cell-text.long {
+.cell-text { font-size: 12.5px; overflow-wrap: anywhere; }.cell-text.long {
   border: none; background: none; padding: 0; text-align: left;
   color: var(--accent); cursor: pointer; font: inherit; font-size: 12.5px;
   max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

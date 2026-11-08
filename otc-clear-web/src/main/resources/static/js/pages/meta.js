@@ -123,8 +123,6 @@ function openSetEditor() {
         <input id="msCode" type="text" placeholder="CONV_METHOD"></div>
       <div class="field"><label>${ui.escapeHtml(t('products.form.displayName'))}</label>
         <input id="msName" type="text"></div>
-      <div class="field"><label>${ui.escapeHtml(t('products.form.sortOrder'))}</label>
-        <input id="msOrder" type="number" min="0" value="${state.sets.length + 1}"></div>
     </div>
     <div class="field"><label>${ui.escapeHtml(t('common.description'))}</label>
       <input id="msDesc" type="text" placeholder="${ui.escapeHtml(t('products.form.optionalHint'))}"></div>`,
@@ -137,7 +135,6 @@ function openSetEditor() {
         code: modal.root.querySelector('#msCode').value.trim().toUpperCase(),
         name: modal.root.querySelector('#msName').value.trim(),
         description: modal.root.querySelector('#msDesc').value.trim() || null,
-        sortOrder: Number(modal.root.querySelector('#msOrder').value) || null,
       });
       modal.close();
       ui.toast(t('meta.toast.setCreated', created.code), 'ok');
@@ -231,7 +228,8 @@ function openItemEditor(item) {
       </div>
     </div>
     <div class="field"><label>${ui.escapeHtml(t('common.remark'))}</label>
-      <input id="miRemark" type="text" value="${editing ? ui.escapeHtml(item.remark || '') : ''}"></div>
+      <textarea id="miRemark" rows="2" placeholder="${ui.escapeHtml(t('products.form.remarkHint'))}">${
+  editing ? ui.escapeHtml(item.remark || '') : ''}</textarea></div>
     <div class="hint">${ui.escapeHtml(t('meta.form.refHint'))}</div>`,
   `<button class="tool-btn" id="miCancel">${ui.escapeHtml(t('common.cancel'))}</button>
    <button class="tool-btn primary" id="miSave">${ui.escapeHtml(t('common.save'))}</button>`);
@@ -240,11 +238,17 @@ function openItemEditor(item) {
   }
   modal.root.querySelector('#miCancel').addEventListener('click', modal.close);
   modal.root.querySelector('#miSave').addEventListener('click', async () => {
+    const order = Number(modal.root.querySelector('#miOrder').value) || null;
+    if (order !== null && entry.items.some((other) => other.sortOrder === order
+        && (!editing || other.code !== item.code))) {
+      ui.toast(t('meta.toast.orderTaken', order), 'error');
+      return;
+    }
     const payload = {
       code: modal.root.querySelector('#miCode').value.trim().toUpperCase(),
       label: modal.root.querySelector('#miLabel').value.trim(),
       refSetCode: modal.root.querySelector('#miRef').value || null,
-      sortOrder: Number(modal.root.querySelector('#miOrder').value) || null,
+      sortOrder: order,
       enabled: modal.root.querySelector('#miEnabled').value === 'true',
       remark: modal.root.querySelector('#miRemark').value.trim() || null,
     };

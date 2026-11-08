@@ -90,11 +90,11 @@
 | --- | --- | --- |
 | GET | `/api/meta/sets` | 集合及其枚举值 |
 | GET | `/api/meta/options` | 按集合分组的启用枚举值（字段编辑器使用） |
-| POST | `/api/meta/sets` | `{code, name, description, sortOrder}` |
-| PATCH | `/api/meta/sets/{code}` | 更新集合 |
+| POST | `/api/meta/sets` | `{code, name, description, sortOrder?}`；`sortOrder` 省略时追加到末尾 |
+| PATCH | `/api/meta/sets/{code}` | 更新集合；`sortOrder` 为 `null` 时保持原值 |
 | DELETE | `/api/meta/sets/{code}` | 内置集合或被引用时返回 400 / 409 |
-| POST | `/api/meta/sets/{code}/items` | `{code, label, refSetCode, sortOrder, enabled, remark}` |
-| PATCH | `/api/meta/sets/{code}/items/{itemCode}` | 更新枚举值 |
+| POST | `/api/meta/sets/{code}/items` | `{code, label, refSetCode, sortOrder, enabled, remark}`；`sortOrder`/`enabled` 省略时追加、默认启用；序号重复返回 409 |
+| PATCH | `/api/meta/sets/{code}/items/{itemCode}` | 更新枚举值；`sortOrder` / `enabled` 为 `null` 时保持原值，序号重复返回 409 |
 | DELETE | `/api/meta/sets/{code}/items/{itemCode}` | 被字段定义引用时返回 409 |
 
 ## 上传与向导

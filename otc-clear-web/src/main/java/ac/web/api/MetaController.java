@@ -50,13 +50,13 @@ public class MetaController {
     @PostMapping("/sets")
     public MetaService.SetView createSet(@RequestBody SetRequest request) {
         return meta.createSet(tenantProvider.tenantId(), request.code(), request.name(), request.description(),
-                request.sortOrder() == null ? 0 : request.sortOrder());
+                request.sortOrder());
     }
 
     @PatchMapping("/sets/{code}")
     public List<MetaService.SetView> updateSet(@PathVariable String code, @RequestBody SetRequest request) {
         meta.updateSet(tenantProvider.tenantId(), code, request.name(), request.description(),
-                request.sortOrder() == null ? 0 : request.sortOrder());
+                request.sortOrder());
         return meta.sets(tenantProvider.tenantId());
     }
 
@@ -69,14 +69,14 @@ public class MetaController {
     @PostMapping("/sets/{code}/items")
     public MetaService.ItemView createItem(@PathVariable String code, @RequestBody ItemRequest request) {
         return meta.createItem(tenantProvider.tenantId(), code, request.code(), request.label(),
-                request.refSetCode(), request.sortOrder() == null ? 0 : request.sortOrder(), request.remark());
+                request.refSetCode(), request.sortOrder(), request.remark());
     }
 
     @PatchMapping("/sets/{code}/items/{itemCode}")
     public MetaService.ItemView updateItem(@PathVariable String code, @PathVariable String itemCode,
             @RequestBody ItemRequest request) {
         meta.updateItem(tenantProvider.tenantId(), code, itemCode, request.label(), request.refSetCode(),
-                request.sortOrder() == null ? 0 : request.sortOrder(), request.enabled(), request.remark());
+                request.sortOrder(), request.enabled(), request.remark());
         return meta.items(tenantProvider.tenantId(), code).stream()
                 .filter(item -> item.code().equals(itemCode))
                 .findFirst()
@@ -108,7 +108,7 @@ public class MetaController {
      * @param code        set code
      * @param name        display name
      * @param description free form note
-     * @param sortOrder   display order
+     * @param sortOrder   display order; {@code null} appends the set at the end
      */
     public record SetRequest(String code, String name, String description, Integer sortOrder) {
     }
@@ -119,11 +119,12 @@ public class MetaController {
      * @param code        item code
      * @param label       display label
      * @param refSetCode  set referenced by this item, used by value types
-     * @param sortOrder   display order
-     * @param enabled     whether the item can be selected
+     * @param sortOrder   display order; {@code null} appends the item at the end
+     * @param enabled     whether the item can be selected; {@code null} keeps the stored value and new
+     *                    items are enabled by default
      * @param remark      free form note
      */
     public record ItemRequest(String code, String label, String refSetCode, Integer sortOrder,
-            boolean enabled, String remark) {
+            Boolean enabled, String remark) {
     }
 }

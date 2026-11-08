@@ -133,6 +133,7 @@ const ICONS = {
   unlock: 'M4.6 7.2V5.4a3.4 3.4 0 0 1 6.6-1.1M3.6 7.2h8.8v5.4a1 1 0 0 1-1 1H4.6a1 1 0 0 1-1-1V7.2z',
   grip: 'M6 3.6h.01M6 8h.01M6 12.4h.01M10 3.6h.01M10 8h.01M10 12.4h.01',
   upload: 'M8 10.6V2.8M4.9 5.9L8 2.8l3.1 3.1M2.8 10.4v1.4a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.4',
+  copy: 'M5.6 5.6h7.2v7.2H5.6zM3.2 10.4V3.2h7.2',
 };
 
 /** Returns an inline SVG icon that inherits the current text color. */
@@ -345,7 +346,7 @@ export function openValuePanel(anchor, text) {
   panel.className = 'val-panel';
   panel.innerHTML = `<pre class="val-panel-pre"></pre>
     <button type="button" class="val-panel-copy" title="${escapeHtml(t('common.copy'))}"
-      aria-label="${escapeHtml(t('common.copy'))}">${icon('list')}</button>`;
+      aria-label="${escapeHtml(t('common.copy'))}">${icon('copy')}</button>`;
   panel.querySelector('.val-panel-pre').textContent = text;
   document.body.appendChild(panel);
 

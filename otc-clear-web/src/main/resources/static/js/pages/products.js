@@ -567,7 +567,8 @@ function openFieldEditor(field) {
     </div>
     <div class="field" style="margin-bottom:10px"><label>${ui.escapeHtml(t('products.form.tags'))}</label>${tagSelector(tags)}</div>
     <div class="field"><label>${ui.escapeHtml(t('products.form.remark'))}</label>
-      <input id="ffRemark" type="text" value="${editing ? ui.escapeHtml(field.remark || '') : ''}"></div>
+      <textarea id="ffRemark" rows="2" placeholder="${ui.escapeHtml(t('products.form.remarkHint'))}">${
+  editing ? ui.escapeHtml(field.remark || '') : ''}</textarea></div>
     <div class="hint" id="ffHint"></div>`,
   `<button class="tool-btn" id="ffCancel">${ui.escapeHtml(t('common.cancel'))}</button>
    <button class="tool-btn primary" id="ffSave">${ui.escapeHtml(t('common.save'))}</button>`);
@@ -960,7 +961,8 @@ function openProductFieldEditor(product, field) {
     </div>
     <div class="field" style="margin-bottom:10px"><label>${ui.escapeHtml(t('products.form.tags'))}</label>${tagSelector(field.tags)}</div>
     <div class="field"><label>${ui.escapeHtml(t('products.form.remark'))}</label>
-      <input id="pfRemark" type="text" value="${ui.escapeHtml(field.remark || '')}"></div>`,
+      <textarea id="pfRemark" rows="2" placeholder="${ui.escapeHtml(t('products.form.remarkHint'))}">${
+  ui.escapeHtml(field.remark || '')}</textarea></div>`,
   `<button class="tool-btn" id="pfCancel">${ui.escapeHtml(t('common.cancel'))}</button>
    <button class="tool-btn primary" id="pfSave">${ui.escapeHtml(t('common.save'))}</button>`);
   bindTagPills(modal.root);

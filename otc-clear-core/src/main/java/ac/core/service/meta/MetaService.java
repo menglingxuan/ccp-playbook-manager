@@ -94,20 +94,22 @@ public class MetaService {
     }
 
     @Transactional
-    public SetView createSet(String tenantId, String code, String name, String description, int sortOrder) {
+    public SetView createSet(String tenantId, String code, String name, String description, Integer sortOrder) {
         String normalized = requireCode(code, "Set code");
         if (meta.setExists(tenantId, normalized)) {
             throw new ApiException(ErrorCode.CONFLICT, "Meta set '" + normalized + "' already exists");
         }
+        int order = sortOrder == null || sortOrder <= 0 ? meta.sets(tenantId).size() + 1 : sortOrder;
         meta.insertSet(tenantId, new MetaRepository.MetaSetRow(normalized, requireText(name, "Set name"),
-                description, false, sortOrder), time.nowUtc());
-        return new SetView(normalized, name, description, false, sortOrder, 0);
+                description, false, order), time.nowUtc());
+        return new SetView(normalized, name, description, false, order, 0);
     }
 
     @Transactional
-    public void updateSet(String tenantId, String code, String name, String description, int sortOrder) {
-        requireSet(tenantId, code);
-        meta.updateSet(tenantId, code, requireText(name, "Set name"), description, sortOrder, time.nowUtc());
+    public void updateSet(String tenantId, String code, String name, String description, Integer sortOrder) {
+        MetaRepository.MetaSetRow row = requireSet(tenantId, code);
+        int order = sortOrder == null || sortOrder <= 0 ? row.sortOrder() : sortOrder;
+        meta.updateSet(tenantId, code, requireText(name, "Set name"), description, order, time.nowUtc());
     }
 
     @Transactional
@@ -132,7 +134,7 @@ public class MetaService {
 
     @Transactional
     public ItemView createItem(String tenantId, String setCode, String code, String label, String refSetCode,
-            int sortOrder, String remark) {
+            Integer sortOrder, String remark) {
         requireSet(tenantId, setCode);
         String normalized = requireCode(code, "Item code");
         if (meta.item(tenantId, setCode, normalized).isPresent()) {
@@ -140,21 +142,41 @@ public class MetaService {
                     "Item '" + normalized + "' already exists in set '" + setCode + "'");
         }
         String ref = normalizeRef(tenantId, refSetCode, setCode);
+        int order = sortOrder == null || sortOrder <= 0
+                ? meta.items(tenantId, setCode).size() + 1 : sortOrder;
+        requireFreeOrder(tenantId, setCode, order, null);
         meta.insertItem(tenantId, new MetaRepository.MetaItemRow(setCode, normalized,
-                requireText(label, "Item label"), ref, sortOrder, true, remark), time.nowUtc());
-        return new ItemView(normalized, label, ref, sortOrder, true, remark);
+                requireText(label, "Item label"), ref, order, true, remark), time.nowUtc());
+        return new ItemView(normalized, label, ref, order, true, remark);
     }
 
+    /**
+     * Updates an item; {@code null} order or enable flag keeps the stored value.
+     */
     @Transactional
     public void updateItem(String tenantId, String setCode, String code, String label, String refSetCode,
-            int sortOrder, boolean enabled, String remark) {
+            Integer sortOrder, Boolean enabled, String remark) {
         requireSet(tenantId, setCode);
-        if (meta.item(tenantId, setCode, code).isEmpty()) {
-            throw ApiException.notFound("Item '" + code + "' does not exist in set '" + setCode + "'");
-        }
+        MetaRepository.MetaItemRow row = meta.item(tenantId, setCode, code)
+                .orElseThrow(() -> ApiException.notFound(
+                        "Item '" + code + "' does not exist in set '" + setCode + "'"));
         String ref = normalizeRef(tenantId, refSetCode, setCode);
-        meta.updateItem(tenantId, setCode, code, requireText(label, "Item label"), ref, sortOrder, enabled,
+        int order = sortOrder == null || sortOrder <= 0 ? row.sortOrder() : sortOrder;
+        requireFreeOrder(tenantId, setCode, order, code);
+        boolean on = enabled == null ? row.enabled() : enabled;
+        meta.updateItem(tenantId, setCode, code, requireText(label, "Item label"), ref, order, on,
                 remark, time.nowUtc());
+    }
+
+    /** Rejects an order already used by another item of the same set. */
+    private void requireFreeOrder(String tenantId, String setCode, int sortOrder, String currentCode) {
+        for (MetaRepository.MetaItemRow item : meta.items(tenantId, setCode)) {
+            if (item.sortOrder() == sortOrder && !item.code().equals(currentCode)) {
+                throw new ApiException(ErrorCode.CONFLICT,
+                        "Order " + sortOrder + " is already used by another item",
+                        Map.of("sortOrder", sortOrder));
+            }
+        }
     }
 
     @Transactional

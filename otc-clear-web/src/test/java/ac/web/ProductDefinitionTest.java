@@ -337,7 +337,80 @@ class ProductDefinitionTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void metaItemsGuardFieldReferences() {        String suffix = suffix();
+    void newMetaEntriesAreAppendedAndEnabledByDefault() {
+        String suffix = suffix();
+        String setCode = "NO_ORDER_" + suffix;
+        var set = api.post("/api/meta/sets",
+                api.toJson(Map.of("code", setCode, "name", "No order", "description", "appended set")));
+        assertThat(set.ok()).as(set.body()).isTrue();
+        assertThat(set.json().get("sortOrder").asInt()).isEqualTo(api.get("/api/meta/sets").json().size());
+
+        var first = api.post("/api/meta/sets/" + setCode + "/items",
+                api.toJson(Map.of("code", "A", "label", "A")));
+        assertThat(first.ok()).as(first.body()).isTrue();
+        assertThat(first.json().get("enabled").asBoolean()).isTrue();
+        assertThat(first.json().get("sortOrder").asInt()).isEqualTo(1);
+
+        var second = api.post("/api/meta/sets/" + setCode + "/items",
+                api.toJson(Map.of("code", "B", "label", "B")));
+        assertThat(second.ok()).as(second.body()).isTrue();
+        assertThat(second.json().get("sortOrder").asInt()).isEqualTo(2);
+
+        var patched = api.patch("/api/meta/sets/" + setCode + "/items/A",
+                api.toJson(Map.of("label", "A2")));
+        assertThat(patched.ok()).as(patched.body()).isTrue();
+        assertThat(patched.json().get("label").asString()).isEqualTo("A2");
+        assertThat(patched.json().get("sortOrder").asInt()).isEqualTo(1);
+        assertThat(patched.json().get("enabled").asBoolean()).isTrue();
+
+        assertThat(api.delete("/api/meta/sets/" + setCode).ok()).isTrue();
+    }
+
+    @Test
+    void metaItemOrderMustBeUnique() {
+        String suffix = suffix();
+        String setCode = "ORDER_SET_" + suffix;
+        assertThat(api.post("/api/meta/sets", api.toJson(Map.of("code", setCode, "name", "Order set")))
+                .ok()).isTrue();
+        assertThat(api.post("/api/meta/sets/" + setCode + "/items",
+                api.toJson(Map.of("code", "A", "label", "A", "sortOrder", 1))).ok()).isTrue();
+
+        var clash = api.post("/api/meta/sets/" + setCode + "/items",
+                api.toJson(Map.of("code", "B", "label", "B", "sortOrder", 1)));
+        assertThat(clash.status()).isEqualTo(409);
+        assertThat(clash.body()).contains("already used");
+
+        assertThat(api.post("/api/meta/sets/" + setCode + "/items",
+                api.toJson(Map.of("code", "B", "label", "B", "sortOrder", 2))).ok()).isTrue();
+
+        var moved = api.patch("/api/meta/sets/" + setCode + "/items/B",
+                api.toJson(Map.of("label", "B", "sortOrder", 1, "enabled", true)));
+        assertThat(moved.status()).isEqualTo(409);
+
+        var kept = api.patch("/api/meta/sets/" + setCode + "/items/B",
+                api.toJson(Map.of("label", "B2", "sortOrder", 2, "enabled", true)));
+        assertThat(kept.ok()).as(kept.body()).isTrue();
+        assertThat(kept.json().get("label").asString()).isEqualTo("B2");
+
+        assertThat(api.delete("/api/meta/sets/" + setCode).ok()).isTrue();
+    }
+
+    @Test
+    void fieldRemarkKeepsLineBreaks() {
+        String baseId = findBaseId("MW", "BSW");
+        var created = api.post("/api/catalog/base-products/" + baseId + "/fields", api.toJson(Map.of(
+                "header", "Remark Field", "valueTypeCode", "TEXT", "roleCode", "BUSINESS", "required", false,
+                "remark", "line one\nline two")));
+        assertThat(created.ok()).as(created.body()).isTrue();
+        assertThat(created.json().get("remark").asString()).isEqualTo("line one\nline two");
+
+        String fieldId = created.json().get("id").asString();
+        assertThat(api.delete("/api/catalog/base-products/" + baseId + "/fields/" + fieldId).ok()).isTrue();
+    }
+
+    @Test
+    void metaItemsGuardFieldReferences() {
+        String suffix = suffix();
         assertThat(api.delete("/api/meta/sets/VALUE_TYPE").status()).isEqualTo(400);
         assertThat(api.delete("/api/meta/sets/FIELD_ROLE/items/BUSINESS").status()).isEqualTo(409);
 
