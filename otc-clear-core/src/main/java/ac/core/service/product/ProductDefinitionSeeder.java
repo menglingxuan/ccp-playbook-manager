@@ -13,6 +13,7 @@ import ac.core.persistence.ProductRepository.ProductRow;
 import ac.core.persistence.SettingRepository;
 import ac.core.service.meta.MetaService;
 import ac.domain.product.BaseProductCode;
+import ac.domain.product.ColumnNames;
 import ac.domain.product.PlatformCode;
 import ac.domain.product.ProductSchema;
 import java.time.LocalDateTime;
@@ -36,13 +37,30 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductDefinitionSeeder implements ApplicationRunner {
 
     static final String MARKER_KEY = "product.seed.version";
-    static final String MARKER_VALUE = "3";
+    static final String MARKER_VALUE = "5";
 
     /** Role code of a business column; derived products keep them required. */
     static final String BUSINESS_ROLE = "BUSINESS";
 
+    static final String MANAGED_ROLE = "MANAGED";
+
+    /** Products whose name carries this word ship the full field set, duplicates included. */
+    private static final String STANDARD_NAME = "Standard";
+
+    /** Deliberately invalid starter product used to exercise the definition validation. */
+    private static final String DRAFT_PRODUCT_CODE = "IRS_DUP_DRAFT";
+
+    /** System managed columns every starter product declares, mirroring the CCSIRS template. */
+    private static final List<SeedField> SYSTEM_MANAGED_FIELDS = List.of(
+            SeedField.managed("testCaseId", "_TestCaseId"),
+            SeedField.managed("remarks", "_Remarks"));
+
     private static boolean isBusinessRole(String roleCode) {
         return BUSINESS_ROLE.equalsIgnoreCase(roleCode == null ? "" : roleCode);
+    }
+
+    private static boolean isManagedRole(String roleCode) {
+        return MANAGED_ROLE.equalsIgnoreCase(roleCode == null ? "" : roleCode);
     }
 
     private final MetaRepository metaRepository;
@@ -115,6 +133,8 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
     }
 
     private static final List<SeedField> IRS_FIELDS = List.of(
+            SeedField.managed("testCaseId", "_TestCaseId"),
+            SeedField.managed("remarks", "_Remarks"),
             SeedField.keyField(),
             SeedField.date("tradeDate", "Trade Date", true),
             SeedField.date("effectiveDate", "Effective Date", false),
@@ -141,6 +161,8 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
             new SeedField("usPerson", "US Person", "BOOLEAN", "BUSINESS", false, List.of(), List.of(), false));
 
     private static final List<SeedField> OIS_FIELDS = List.of(
+            SeedField.managed("testCaseId", "_TestCaseId"),
+            SeedField.managed("remarks", "_Remarks"),
             SeedField.keyField(),
             SeedField.date("tradeDate", "Trade Date", true),
             SeedField.date("effectiveDate", "Effective Date", false),
@@ -267,7 +289,157 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
         if ("1".equals(fromVersion)) {
             replaceCcsirsFields(tenantId);
         }
+        ensureSystemManagedFields(tenantId);
+        applyColumnMatchingRules(tenantId);
         log.info("Upgraded product definitions of tenant {} from seed version {}", tenantId, fromVersion);
+    }
+
+    /**
+     * Adds the two system managed columns to the IRS/OIS base products of an existing catalogue so
+     * those columns are declared, just like the CCSIRS template does. Derived products inherit them.
+     */
+    private void ensureSystemManagedFields(String tenantId) {
+        for (BaseProductCode code : List.of(BaseProductCode.IRS, BaseProductCode.OIS)) {
+            baseRepository.findByCode(tenantId, PlatformCode.MW.name(), code.name()).ifPresent(base -> {
+                List<BaseFieldRow> existing = baseRepository.listFields(tenantId, base.id());
+                if (hasHeader(existing.stream().map(BaseFieldRow::header).toList(),
+                        SYSTEM_MANAGED_FIELDS.get(0).header())) {
+                    return;
+                }
+                LocalDateTime now = time.nowUtc();
+                for (BaseFieldRow field : existing) {
+                    baseRepository.updateFieldOrder(field.id(), field.sortOrder() + SYSTEM_MANAGED_FIELDS.size(),
+                            now);
+                }
+                List<BaseFieldRow> inserted = writeLeadingManagedFields(tenantId, base.id());
+                ProductSchema schema = schemaMapper.toBaseSchema(base,
+                        baseRepository.listFields(tenantId, base.id()), metaLookup.load(tenantId));
+                baseRepository.updateSchemaHash(base.id(), schema.schemaHash(), now);
+                for (ProductRow product : productRepository.listByBaseProduct(tenantId, base.id())) {
+                    List<ProductFieldRow> fields = productRepository.listFields(tenantId, product.id());
+                    if (hasHeader(fields.stream().map(ProductFieldRow::header).toList(),
+                            SYSTEM_MANAGED_FIELDS.get(0).header())) {
+                        continue;
+                    }
+                    for (ProductFieldRow field : fields) {
+                        productRepository.updateFieldOrder(field.id(),
+                                field.sortOrder() + SYSTEM_MANAGED_FIELDS.size(), now);
+                    }
+                    copyLeadingManagedFields(tenantId, product.id(), inserted);
+                    refreshSchemaHash(tenantId, product);
+                }
+                log.info("Added {} system managed columns to {}/{}", SYSTEM_MANAGED_FIELDS.size(),
+                        PlatformCode.MW, base.code());
+            });
+        }
+    }
+
+    private static boolean hasHeader(List<String> headers, String header) {
+        return headers.stream().anyMatch(value -> ColumnNames.same(value, header));
+    }
+
+    /** Writes the system managed columns as the first fields of a base product. */
+    private List<BaseFieldRow> writeLeadingManagedFields(String tenantId, String baseProductId) {
+        int order = 0;
+        List<BaseFieldRow> inserted = new ArrayList<>();
+        for (SeedField field : SYSTEM_MANAGED_FIELDS) {
+            order++;
+            BaseFieldRow row = new BaseFieldRow(Ids.newId(), tenantId, baseProductId, field.key(), field.header(),
+                    field.header(), field.aliases(), field.valueTypeCode(), field.roleCode(), field.tags(),
+                    field.required(), true, field.keyFlag(), order, null, "", "");
+            baseRepository.insertField(row);
+            inserted.add(row);
+        }
+        return inserted;
+    }
+
+    /** Copies the given base fields as the first fields of a derived product. */
+    private void copyLeadingManagedFields(String tenantId, String productId, List<BaseFieldRow> baseFields) {
+        LocalDateTime now = time.nowUtc();
+        int order = 0;
+        for (BaseFieldRow field : baseFields) {
+            order++;
+            productRepository.insertField(new ProductFieldRow(Ids.newId(), tenantId, productId, field.id(),
+                    field.fieldKey(), field.header(), field.displayName(), field.aliases(),
+                    field.valueTypeCode(), field.roleCode(), field.tags(), field.required(),
+                    field.businessKey(), field.keyFlag(), order, field.remark(), field.formatHint(),
+                    field.clonePattern()), now);
+        }
+    }
+
+    /**
+     * Aligns existing products with the column matching rules: standard products declare duplicated
+     * column names on purpose and therefore use strict matching, every other product keeps a single
+     * column per name.
+     */
+    private void applyColumnMatchingRules(String tenantId) {
+        for (ProductRow product : productRepository.listAll(tenantId)) {
+            if (!"ACTIVE".equals(product.status())) {
+                continue;
+            }
+            List<ProductFieldRow> fields = productRepository.listFields(tenantId, product.id());
+            boolean standard = product.name() != null && product.name().contains(STANDARD_NAME);
+            List<ProductFieldRow> duplicates = dropDuplicateTradeColumns(fields);
+            boolean strict = standard && !duplicates.isEmpty();
+            if (!standard && !duplicates.isEmpty()) {
+                for (ProductFieldRow field : duplicates) {
+                    productRepository.deleteField(field.id());
+                }
+            }
+            if (strict != product.strictMatch()) {
+                productRepository.update(product.id(), product.name(), product.description(), strict,
+                        time.nowUtc());
+            }
+            refreshSchemaHash(tenantId, product);
+        }
+        ensureDraftProduct(tenantId);
+    }
+
+    /** Creates the invalid starter product when the catalogue does not carry it yet. */
+    private void ensureDraftProduct(String tenantId) {
+        baseRepository.findByCode(tenantId, PlatformCode.MW.name(), BaseProductCode.IRS.name())
+                .ifPresent(base -> {
+                    if (productRepository.findByCode(tenantId, DRAFT_PRODUCT_CODE).isPresent()) {
+                        return;
+                    }
+                    insertDraftProduct(tenantId, base);
+                    log.info("Created invalid starter product {}", DRAFT_PRODUCT_CODE);
+                });
+    }
+
+    /** Fields that repeat a column name of an earlier field, ignoring managed columns. */
+    private static List<ProductFieldRow> dropDuplicateTradeColumns(List<ProductFieldRow> fields) {
+        Set<String> seen = new LinkedHashSet<>();
+        List<ProductFieldRow> duplicated = new ArrayList<>();
+        for (ProductFieldRow field : fields) {
+            if (isManagedRole(field.roleCode())) {
+                continue;
+            }
+            if (!seen.add(ColumnNames.key(field.header()))) {
+                duplicated.add(field);
+            }
+        }
+        return duplicated;
+    }
+
+    private static boolean hasDuplicateBaseColumns(List<BaseFieldRow> fields) {
+        Set<String> seen = new LinkedHashSet<>();
+        for (BaseFieldRow field : fields) {
+            if (isManagedRole(field.roleCode())) {
+                continue;
+            }
+            if (!seen.add(ColumnNames.key(field.header()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Recomputes and stores the schema hash of a product definition. */
+    private void refreshSchemaHash(String tenantId, ProductRow product) {
+        ProductSchema schema = schemaMapper.toSchema(product,
+                productRepository.listFields(tenantId, product.id()), metaLookup.load(tenantId));
+        productRepository.updateSchemaHash(product.id(), schema.schemaHash(), time.nowUtc());
     }
 
     /** Collapses TRADE/KEY into BUSINESS and keeps MANAGED, matching the current role set. */
@@ -419,6 +591,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
                             "Derived from IRS, drops reporting and portfolio fields",
                             Set.of("upi", "reportingParty", "portfolio", "usPerson", "novationDate",
                                     "counterparty"));
+                    insertDraftProduct(tenantId, base);
                 }
                 case "OIS" -> insertProduct(tenantId, base, "OIS", "OIS Standard", "Full OIS field set", Set.of());
                 case "CCSIRS" -> insertProduct(tenantId, base, "CCSIRS", "CCSIRS Standard",
@@ -451,24 +624,58 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
 
     private void insertProduct(String tenantId, BaseProductRow base, String code, String name,
             String description, Set<String> excludedFieldKeys) {
-        LocalDateTime now = time.nowUtc();
-        Set<String> excluded = new LinkedHashSet<>(excludedFieldKeys);
-        ProductRow product = new ProductRow(Ids.newId(), tenantId, base.platformCode(), base.id(), base.code(),
-                code, name, description, "ACTIVE", false, null, now, now);
-        productRepository.insert(product);
+        List<BaseFieldRow> source = selectProductFields(tenantId, base, excludedFieldKeys, name);
+        boolean strict = name.contains(STANDARD_NAME) && hasDuplicateBaseColumns(source);
+        insertProductRow(tenantId, base, code, name, description, source, strict);
+    }
+
+    /** Starter product that keeps duplicated column names and therefore stays invalid on purpose. */
+    private void insertDraftProduct(String tenantId, BaseProductRow base) {
+        List<BaseFieldRow> source = new ArrayList<>(baseRepository.listFields(tenantId, base.id()));
+        insertProductRow(tenantId, base, DRAFT_PRODUCT_CODE, "IRS Duplicate Draft",
+                "Non strict product that keeps duplicated column names, used to verify the invalid state",
+                source, false);
+    }
+
+    /**
+     * Picks the base fields inherited by a new product. A standard product keeps every column,
+     * duplicates included, because strict matching tells them apart; any other product keeps a
+     * single column per name.
+     */
+    private List<BaseFieldRow> selectProductFields(String tenantId, BaseProductRow base,
+            Set<String> excludedFieldKeys, String name) {
+        boolean standard = name.contains(STANDARD_NAME);
+        Set<String> seen = new LinkedHashSet<>();
+        List<BaseFieldRow> selected = new ArrayList<>();
         for (BaseFieldRow field : baseRepository.listFields(tenantId, base.id())) {
-            if (excluded.contains(field.fieldKey())) {
+            if (excludedFieldKeys.contains(field.fieldKey())) {
                 continue;
             }
+            boolean managed = isManagedRole(field.roleCode());
+            boolean firstWithName = seen.add(ColumnNames.key(field.header()));
+            if (managed || firstWithName || standard) {
+                selected.add(field);
+            }
+        }
+        return selected;
+    }
+
+    private void insertProductRow(String tenantId, BaseProductRow base, String code, String name,
+            String description, List<BaseFieldRow> fields, boolean strictMatch) {
+        LocalDateTime now = time.nowUtc();
+        ProductRow product = new ProductRow(Ids.newId(), tenantId, base.platformCode(), base.id(), base.code(),
+                code, name, description, "ACTIVE", strictMatch, null, now, now);
+        productRepository.insert(product);
+        int order = 0;
+        for (BaseFieldRow field : fields) {
+            order++;
             productRepository.insertField(new ProductFieldRow(Ids.newId(), tenantId, product.id(), field.id(),
                     field.fieldKey(), field.header(), field.displayName(), field.aliases(),
                     field.valueTypeCode(), field.roleCode(), field.tags(),
                     isBusinessRole(field.roleCode()) || field.required(),
-                    field.businessKey(), field.keyFlag(), field.sortOrder(), field.remark(),
-                    field.formatHint(), field.clonePattern()), now);
+                    field.businessKey(), field.keyFlag(), order, field.remark(), field.formatHint(),
+                    field.clonePattern()), now);
         }
-        ProductSchema schema = schemaMapper.toSchema(product,
-                productRepository.listFields(tenantId, product.id()), metaLookup.load(tenantId));
-        productRepository.updateSchemaHash(product.id(), schema.schemaHash(), now);
+        refreshSchemaHash(tenantId, product);
     }
 }

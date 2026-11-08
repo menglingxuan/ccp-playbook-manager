@@ -1,37 +1,60 @@
 package ac.domain.layout;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ac.domain.TestSchemas;
 import ac.domain.TestTables;
-import ac.domain.product.FieldDef;
-import ac.domain.product.FieldRole;
-import ac.domain.product.FieldType;
-import ac.domain.product.ProductSchema;
 import ac.domain.table.RawTable;
-import java.util.List;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class ColumnLayoutResolverTest {
 
-    private static final ProductSchema SCHEMA = TestSchemas.small();
-
     @Test
-    void splitsManagedColumnsOnBothSides() {
+    void declaredManagedColumnsAreManagedAndTheRestIsUnmapped() {
         RawTable table = TestTables.table("Sheet1",
-                new String[] {"_TestCaseId", "_Remarks", "A", "B", "C", "After"},
-                new String[] {"TC-1", "note", "a1", "b1", "c1", "x"});
+                new String[] {"_TestCaseId", "_Remarks", "A", "B", "C", "Extra Ref", "After"},
+                new String[] {"TC-1", "note", "a1", "b1", "c1", "ref", "x"});
 
-        SheetLayout layout = ColumnLayoutResolver.resolve(SCHEMA, table, 1, 3);
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.smallWithManaged(), table, 1, 3);
 
-        assertThat(layout.tradeStartColumn()).isEqualTo(3);
-        assertThat(layout.tradeEndColumn()).isEqualTo(5);
         assertThat(layout.assignmentsOf(ColumnKind.MANAGED)).extracting(ColumnAssignment::managedKey)
-                .containsExactly("_TestCaseId", "_Remarks", "After");
+                .containsExactly("_TestCaseId", "_Remarks");
         assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
                 .containsExactly("a", "b", "c");
-        assertThat(layout.missingFields()).isEmpty();
+        assertThat(layout.assignmentsOf(ColumnKind.UNMAPPED)).extracting(ColumnAssignment::header)
+                .containsExactly("Extra Ref", "After");
+        assertThat(layout.blockContiguous()).isTrue();
+        assertThat(layout.tradeStartColumn()).isEqualTo(3);
+        assertThat(layout.tradeEndColumn()).isEqualTo(5);
+    }
+
+    @Test
+    void undeclaredSystemColumnsStayUnmapped() {
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"_TestCaseId", "_Remarks", "A", "B", "C"},
+                new String[] {"TC-1", "note", "a1", "b1", "c1"});
+
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.small(), table, 1, 3);
+
+        assertThat(layout.assignmentsOf(ColumnKind.MANAGED)).isEmpty();
+        assertThat(layout.assignmentsOf(ColumnKind.UNMAPPED)).extracting(ColumnAssignment::header)
+                .containsExactly("_TestCaseId", "_Remarks");
+    }
+
+    @Test
+    void businessFieldsOnlyStartAtTheGivenColumn() {
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"C", "A", "B"},
+                new String[] {"c1", "a1", "b1"});
+
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.small(), table, 1, 2);
+
+        assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
+                .containsExactly("a", "b");
+        assertThat(layout.assignmentsOf(ColumnKind.UNMAPPED)).extracting(ColumnAssignment::header)
+                .containsExactly("C");
+        assertThat(layout.missingFields()).containsExactly("c");
     }
 
     @Test
@@ -40,73 +63,179 @@ class ColumnLayoutResolverTest {
                 new String[] {"A", "C"},
                 new String[] {"a1", "c1"});
 
-        SheetLayout layout = ColumnLayoutResolver.resolve(SCHEMA, table, 1, 1);
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.small(), table, 1, 1);
 
         assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
                 .containsExactly("a", "c");
         assertThat(layout.missingFields()).containsExactly("b");
+        assertThat(layout.blockContiguous()).isTrue();
     }
 
     @Test
-    void duplicateHeadersMapInDeclarationOrder() {
-        ProductSchema schema = TestSchemas.duplicateRate();
+    void unmappedColumnInsideTheRegionBreaksContiguity() {
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"A", "Bogus", "C"},
+                new String[] {"a1", "x", "c1"});
+
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.small(), table, 1, 1);
+
+        assertThat(layout.assignmentsOf(ColumnKind.UNMAPPED)).extracting(ColumnAssignment::header)
+                .containsExactly("Bogus");
+        assertThat(layout.blockContiguous()).isFalse();
+        assertThat(layout.tradeEndColumn()).isEqualTo(3);
+    }
+
+    @Test
+    void duplicateNamesArePairedInFileOrder() {
         RawTable table = TestTables.table("Sheet1",
                 new String[] {"Trade ID", "Rate", "Rate"},
-                new String[] {"T-1", "0.01", "0.02"});
+                new String[] {"T-1", "0.03", "0.04"});
 
-        SheetLayout layout = ColumnLayoutResolver.resolve(schema, table, 1, 1);
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.duplicateRate(), table, 1, 1);
 
         assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
                 .containsExactly("tradeId", "fixedRate", "floatingRate");
+        assertThat(layout.missingFields()).isEmpty();
     }
 
     @Test
-    void unmappedColumnInsideBlockIsReported() {
+    void surplusColumnsMatchNoFieldOnceTheQueueIsDrained() {
         RawTable table = TestTables.table("Sheet1",
-                new String[] {"A", "Unknown Extra", "C"},
-                new String[] {"a1", "x", "c1"});
+                new String[] {"Trade ID", "Rate", "Rate", "Rate"},
+                new String[] {"T-1", "0.03", "0.04", "0.05"});
 
-        SheetLayout layout = ColumnLayoutResolver.resolve(SCHEMA, table, 1, 1);
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.duplicateRate(), table, 1, 1);
 
+        assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
+                .containsExactly("tradeId", "fixedRate", "floatingRate");
+        assertThat(layout.assignmentsOf(ColumnKind.UNMAPPED)).hasSize(1);
+    }
+
+    @Test
+    void nameMatchingIgnoresCaseAndSurroundingSpaces() {
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"  a ", "B"},
+                new String[] {"a1", "b1"});
+
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.small(), table, 1, 1);
+
+        assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
+                .containsExactly("a", "b");
+    }
+
+    @Test
+    void punctuationDifferencesDoNotMatch() {
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"Trade_Date", "Notional"},
+                new String[] {"2026-01-02", "1000"});
+
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.analyzed(), table, 1, 1);
+
+        assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
+                .containsExactly("notional");
+        assertThat(layout.missingFields()).contains("tradeId", "tradeDate");
         assertThat(layout.assignmentsOf(ColumnKind.UNMAPPED)).extracting(ColumnAssignment::header)
-                .containsExactly("Unknown Extra");
-        assertThat(layout.mappedTradeColumnCount()).isEqualTo(2);
+                .contains("Trade_Date");
     }
 
     @Test
-    void normalizesHeaderSpellingVariants() {
+    void aliasesAreNotUsedForMatching() {
         RawTable table = TestTables.table("Sheet1",
-                new String[] {"Ａ", " b ", "C."},
-                new String[] {"1", "2", "3"});
+                new String[] {"Trade ID", "CCY"},
+                new String[] {"T-1", "USD"});
 
-        SheetLayout layout = ColumnLayoutResolver.resolve(SCHEMA, table, 1, 1);
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.irs(), table, 1, 1);
+
+        assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
+                .containsExactly("tradeId");
+        assertThat(layout.missingFields()).contains("notionalCurrency");
+    }
+
+    @Test
+    void crossedFieldOrderStillMatchesByName() {
+        // product fields were reordered to Trade Date, Trade ID while the file keeps the base order
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"Trade ID", "Trade Date", "Notional"},
+                new String[] {"T-1", "2026-01-02", "1000"});
+
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.analyzedSwappedKeyOrder(), table, 1, 1);
 
         assertThat(layout.missingFields()).isEmpty();
+        assertThat(layout.assignmentsOf(ColumnKind.UNMAPPED)).isEmpty();
+        assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
+                .containsExactly("tradeId", "tradeDate", "notional");
         assertThat(layout.mappedTradeColumnCount()).isEqualTo(3);
     }
 
     @Test
-    void detectsTradeBlockEndAtLastMatchingColumn() {
+    void strictRegionCoversBusinessAndManagedFieldsInOrder() {
         RawTable table = TestTables.table("Sheet1",
-                new String[] {"A", "B", "C", "Basis", "Note"},
-                new String[] {"1", "2", "3", "4", "5"});
+                new String[] {"_TestCaseId", "_Remarks", "Trade ID", "Rate", "Rate", "Extra Ref"},
+                new String[] {"TC-1", "note", "T-1", "0.03", "0.04", "ref"});
 
-        SheetLayout layout = ColumnLayoutResolver.resolve(SCHEMA, table, 1, 1);
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.strictIrs(), table, 1, 1);
 
-        assertThat(layout.lastColumn()).isEqualTo(5);
-        assertThat(layout.tradeEndColumn()).isEqualTo(3);
-        assertThat(layout.assignmentsOf(ColumnKind.MANAGED)).extracting(ColumnAssignment::header)
-                .containsExactly("Basis", "Note");
+        assertThat(layout.tradeStartColumn()).isEqualTo(1);
+        assertThat(layout.tradeEndColumn()).isEqualTo(5);
+        assertThat(layout.assignmentsOf(ColumnKind.MANAGED)).extracting(ColumnAssignment::managedKey)
+                .containsExactly("_TestCaseId", "_Remarks");
+        assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
+                .containsExactly("tradeId", "fixedRate", "floatingRate");
+        assertThat(layout.assignmentsOf(ColumnKind.UNMAPPED)).extracting(ColumnAssignment::header)
+                .containsExactly("Extra Ref");
+        assertThat(layout.missingFields()).isEmpty();
+        assertThat(layout.blockContiguous()).isTrue();
     }
 
     @Test
-    void alignsFieldsAfterFuzzyHeaderMatch() {
-        FieldDef field = FieldDef.of("notionalAmount", 1, "Notional Amount", List.of(), FieldType.DECIMAL,
-                FieldRole.BUSINESS, false, true, "", "", 1, Set.of("notionalamount"));
-        SequenceAligner.Match match = SequenceAligner.align(List.of("Notionl Amount"), List.of(field))
-                .matches().get(0);
+    void strictRegionTurnsUnknownColumnsIntoUnmappedColumns() {
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"_TestCaseId", "_Remarks", "Trade ID", "Bogus", "Rate"},
+                new String[] {"TC-1", "note", "T-1", "x", "0.03"});
 
-        assertThat(match.fieldKey()).isEqualTo("notionalAmount");
-        assertThat(match.score()).isEqualTo(SequenceAligner.SCORE_FUZZY);
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.strictIrs(), table, 1, 1);
+
+        assertThat(layout.assignmentsOf(ColumnKind.UNMAPPED)).extracting(ColumnAssignment::header)
+                .containsExactly("Bogus");
+        assertThat(layout.blockContiguous()).isFalse();
+        assertThat(layout.missingFields()).containsExactly("fixedRate");
+    }
+
+    @Test
+    void strictModeMapsByPositionEvenWhenTheFileIsShort() {
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"Trade ID", "Rate"},
+                new String[] {"T-1", "0.03"});
+
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.duplicateRateStrict(), table, 1, 1);
+
+        assertThat(layout.assignmentsOf(ColumnKind.TRADE)).extracting(ColumnAssignment::fieldKey)
+                .containsExactly("tradeId", "fixedRate");
+        assertThat(layout.missingFields()).containsExactly("floatingRate");
+        assertThat(layout.blockContiguous()).isFalse();
+    }
+
+    @Test
+    void strictModeLeavesColumnsUnmappedWhenTheOrderDiffers() {
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"Rate", "Trade ID"},
+                new String[] {"0.03", "T-1"});
+
+        SheetLayout layout = ColumnLayoutResolver.resolve(TestSchemas.duplicateRateStrict(), table, 1, 1);
+
+        assertThat(layout.assignmentsOf(ColumnKind.TRADE)).isEmpty();
+        assertThat(layout.blockContiguous()).isFalse();
+        assertThat(layout.missingFields()).containsExactly("tradeId", "fixedRate", "floatingRate");
+    }
+
+    @Test
+    void failsWhenNothingMatches() {
+        RawTable table = TestTables.table("Sheet1",
+                new String[] {"Nothing", "Useful"},
+                new String[] {"1", "2"});
+
+        assertThatThrownBy(() -> ColumnLayoutResolver.resolve(TestSchemas.small(), table, 1, 1))
+                .isInstanceOf(LayoutException.class)
+                .hasMessageContaining("No trade column matched");
     }
 }

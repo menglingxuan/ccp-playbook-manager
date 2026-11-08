@@ -4,8 +4,11 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Normalizes header text before comparison: removes blanks and punctuation, converts full width
- * characters to half width and lower cases the result.
+ * Normalizes header text for the managed column heuristics: removes blanks and punctuation,
+ * converts full width characters to half width and lower cases the result.
+ *
+ * <p>Import matching does not use this class; it compares column names with
+ * {@link ColumnNames#key(String)}, which only trims and ignores case.
  */
 public final class HeaderNormalizer {
 

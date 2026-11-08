@@ -8,13 +8,15 @@ package ac.core.service.importflow;
  * @param headerRow        1-based header row, 0 or null means auto detect
  * @param tradeStartColumn 1-based trade block start, 0 or null means auto detect
  * @param dataStartRow     1-based first data row, 0 or null means header row plus one
+ * @param dataEndRow       1-based last data row, 0 or null means "until the end of the sheet"
  */
 public record ImportSelection(
         Integer sheetIndex,
         String productCode,
         Integer headerRow,
         Integer tradeStartColumn,
-        Integer dataStartRow) {
+        Integer dataStartRow,
+        Integer dataEndRow) {
 
     public int resolvedSheetIndex() {
         return sheetIndex == null || sheetIndex < 0 ? 0 : sheetIndex;
@@ -30,5 +32,9 @@ public record ImportSelection(
 
     public int dataStartRowOrAuto() {
         return dataStartRow == null ? 0 : dataStartRow;
+    }
+
+    public int dataEndRowOrAuto() {
+        return dataEndRow == null ? 0 : dataEndRow;
     }
 }

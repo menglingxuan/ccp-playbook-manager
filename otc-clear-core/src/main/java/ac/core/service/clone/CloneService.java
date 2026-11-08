@@ -89,7 +89,7 @@ public class CloneService {
         }
         LocalDateTime now = time.nowUtc();
         String batchId = Ids.newId();
-        ImportBatchRow batch = new ImportBatchRow(batchId, tenantId, null, "CLONE", plan.parentBatchId(),
+        ImportBatchRow batch = new ImportBatchRow(batchId, tenantId, null, null, "CLONE", plan.parentBatchId(),
                 plan.schema().code(), "clone-" + plan.schema().code(), null, "CLONE", null, 0, 0, 0, null, null,
                 plan.schema().schemaHash(), "ACTIVE", plan.rows().size(), 0, request.note(), "system", now, now,
                 null);

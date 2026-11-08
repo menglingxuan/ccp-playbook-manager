@@ -1,7 +1,6 @@
 package ac.domain.layout;
 
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Resolved layout of one sheet.
@@ -11,12 +10,12 @@ import java.util.Optional;
  *
  * @param headerRow        1-based row that holds column names
  * @param dataStartRow     1-based first data row
- * @param tradeStartColumn 1-based first column of the contiguous trade block
+ * @param tradeStartColumn 1-based first column of the trade block
  * @param tradeEndColumn   1-based last column of the trade block (inclusive)
  * @param lastColumn       1-based last column that carries content
  * @param assignments      one assignment per column, ordered by column index
  * @param missingFields    product field keys that found no column
- * @param ambiguous        true when two trade block candidates scored equally
+ * @param blockContiguous  true when every column of the trade block maps to a field
  */
 public record SheetLayout(
         int headerRow,
@@ -26,7 +25,7 @@ public record SheetLayout(
         int lastColumn,
         List<ColumnAssignment> assignments,
         List<String> missingFields,
-        boolean ambiguous) {
+        boolean blockContiguous) {
 
     public SheetLayout {
         assignments = List.copyOf(assignments);
@@ -39,13 +38,6 @@ public record SheetLayout(
 
     public int tradeEndIndex() {
         return tradeEndColumn - 1;
-    }
-
-    public Optional<ColumnAssignment> assignmentFor(int column) {
-        if (column < 0 || column >= assignments.size()) {
-            return Optional.empty();
-        }
-        return Optional.ofNullable(assignments.get(column));
     }
 
     public List<ColumnAssignment> assignmentsOf(ColumnKind kind) {

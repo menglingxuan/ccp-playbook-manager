@@ -26,15 +26,17 @@ class TenantScopingTest extends AbstractIntegrationTest {
     void otherTenantCannotReadCasesOrTasks() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String csv = """
-                Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction
-                TEN-%s,2026-01-02,2031-01-02,1000000,USD,0.03,0.04,BUY
+                Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction
+                TEN-%s,2026-01-02,2031-01-02,1000000,USD,0.03,BUY
                 """.formatted(suffix);
         var upload = api.upload("/api/uploads", "tenant_" + suffix + ".csv",
                 csv.getBytes(StandardCharsets.UTF_8));
         String uploadId = upload.json().get("uploadId").asString();
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "direction"));
         var importResponse = api.post("/api/imports", api.toJson(Map.of(
                 "uploadId", uploadId, "force", false,
-                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", "IRS")))));
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
         String taskId = importResponse.json().get("taskId").asString();
         String batchId = importResponse.json().get("batches").get(0).get("batchId").asString();
         var cases = api.get("/api/batches/" + batchId + "/cases?page=1&size=10");

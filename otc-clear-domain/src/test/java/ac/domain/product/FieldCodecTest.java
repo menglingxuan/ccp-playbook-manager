@@ -11,7 +11,7 @@ class FieldCodecTest {
 
     private static FieldDef field(FieldType type) {
         return FieldDef.of("value", 1, "Value", java.util.List.of(), type, FieldRole.BUSINESS, false, true,
-                "", "", 1, java.util.Set.of("value"));
+                "", "", 1);
     }
 
     @Test
@@ -62,7 +62,7 @@ class FieldCodecTest {
     @Test
     void enumeratedValuesAreValidatedAgainstAllowedLabels() {
         FieldDef enumField = new FieldDef("convention", 1, "Conversion Method", java.util.List.of(),
-                FieldType.ENUM, FieldRole.BUSINESS, false, true, false, "", "", 1, java.util.Set.of(),
+                FieldType.ENUM, FieldRole.BUSINESS, false, true, false, "", "", 1,
                 java.util.List.of("FIELD_TAG"), java.util.List.of("Modified Following", "Flowing", "Preceding"));
 
         assertThat(FieldCodec.parse(enumField, "flowing")).isEqualTo("Flowing");
@@ -74,7 +74,7 @@ class FieldCodecTest {
     @Test
     void enumeratedFieldWithoutAllowedValuesAcceptsAnyText() {
         FieldDef enumField = FieldDef.of("convention", 1, "Conversion Method", java.util.List.of(),
-                FieldType.ENUM, FieldRole.BUSINESS, false, true, "", "", 1, java.util.Set.of());
+                FieldType.ENUM, FieldRole.BUSINESS, false, true, "", "", 1);
 
         assertThat(FieldCodec.parse(enumField, "Anything")).isEqualTo("Anything");
     }

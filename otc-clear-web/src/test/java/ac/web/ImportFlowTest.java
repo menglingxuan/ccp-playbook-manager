@@ -13,9 +13,9 @@ import tools.jackson.databind.JsonNode;
 class ImportFlowTest extends AbstractIntegrationTest {
 
     private static final String CSV_TEMPLATE = """
-            _TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction,Extra Ref
-            TC-1,first,%s,2026-01-02,2031-01-02,"1,500,000.00",USD,0.0325,0.0425,BUY,ref-1
-            TC-2,second,%s-B,2026-02-03,2031-02-03,2000000,EUR,0.025,0.035,SELL,ref-2
+            _TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction,Extra Ref
+            TC-1,first,%s,2026-01-02,2031-01-02,"1,500,000.00",USD,0.0325,BUY,ref-1
+            TC-2,second,%s-B,2026-02-03,2031-02-03,2000000,EUR,0.025,SELL,ref-2
             """;
 
     @Test
@@ -23,8 +23,8 @@ class ImportFlowTest extends AbstractIntegrationTest {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String tradeId = "IRS-" + suffix;
         String csv = CSV_TEMPLATE.formatted(tradeId, tradeId);
-        String productCode = productWithFields("MW", "IRS", List.of("tradeId", "tradeDate", "maturityDate",
-                "notional", "notionalCurrency", "fixedRate", "floatingRate", "direction"));
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "direction"));
 
         var upload = api.upload("/api/uploads", "irs_" + suffix + ".csv",
                 csv.getBytes(StandardCharsets.UTF_8));
@@ -40,11 +40,10 @@ class ImportFlowTest extends AbstractIntegrationTest {
         assertThat(previewJson.get("valid").asBoolean()).isTrue();
         assertThat(previewJson.get("layout").get("headerRow").asInt()).isEqualTo(1);
         assertThat(previewJson.get("layout").get("tradeStartColumn").asInt()).isEqualTo(3);
-        assertThat(previewJson.get("stats").get("mappedTradeColumns").asInt()).isEqualTo(8);
-        assertThat(previewJson.get("stats").get("managedColumns").asInt()).isEqualTo(3);
+        assertThat(previewJson.get("stats").get("mappedTradeColumns").asInt()).isEqualTo(7);
+        assertThat(previewJson.get("stats").get("managedColumns").asInt()).isEqualTo(2);
         JsonNode firstSample = previewJson.get("sampleRows").get(0);
         assertThat(firstSample.get("values").get("fixedRate").decimalValue().toPlainString()).isEqualTo("0.0325");
-        assertThat(firstSample.get("values").get("floatingRate").decimalValue().toPlainString()).isEqualTo("0.0425");
 
         var importResponse = api.post("/api/imports", api.toJson(Map.of(
                 "uploadId", uploadId,
@@ -81,7 +80,7 @@ class ImportFlowTest extends AbstractIntegrationTest {
             }
         }
         assertThat(tradeSection).isNotNull();
-        assertThat(tradeSection.get("rows")).hasSize(8);
+        assertThat(tradeSection.get("rows")).hasSize(7);
 
         var clonePreview = api.post("/api/clones/preview", api.toJson(Map.of(
                 "caseIds", List.of(caseId), "copies", 2, "template", "{base}-C{seq:02}", "note", "it")));
@@ -103,9 +102,8 @@ class ImportFlowTest extends AbstractIntegrationTest {
         assertThat(precheck.ok()).as(precheck.body()).isTrue();
         assertThat(precheck.json().get("valid").asBoolean()).isTrue();
         JsonNode headers = precheck.json().get("headers");
-        assertThat(headers).hasSize(11);
+        assertThat(headers).hasSize(9);
         assertThat(headers.get(7).asString()).isEqualTo("Rate");
-        assertThat(headers.get(8).asString()).isEqualTo("Rate");
 
         var export = api.post("/api/exports", api.toJson(exportRequest));
         assertThat(export.ok()).as(export.body()).isTrue();
@@ -120,6 +118,257 @@ class ImportFlowTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void reimportingTheSameFileStartsAFreshBatch() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String csv = """
+                _TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction,Extra Ref
+                AGAIN-%s,note,AGAIN-%s,2026-01-02,2031-01-02,1000000,USD,0.03,BUY,ref-1
+                """.formatted(suffix, suffix);
+
+        var first = importFile(csv, "again1_" + suffix + ".csv", productCode);
+        assertThat(first.json().get("status").asString()).isEqualTo("SUCCEEDED");
+        var second = importFile(csv, "again2_" + suffix + ".csv", productCode);
+
+        assertThat(second.json().get("status").asString()).isEqualTo("SUCCEEDED");
+        assertThat(second.json().get("batchCount").asInt()).isEqualTo(1);
+        assertThat(second.json().get("issues").toString())
+                .doesNotContain("DUPLICATE_IMPORT")
+                .doesNotContain("KEY_DUPLICATE");
+        // wizard level column notes are not repeated in the import result
+        assertThat(second.json().get("issues").toString())
+                .doesNotContain("UNMAPPED_TRADE_COLUMN")
+                .doesNotContain("DUPLICATE_HEADER_MAPPING");
+    }
+
+    @Test
+    void submittingTheSameUploadTwiceIsReportedAsDuplicate() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String csv = """
+                Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction
+                TWICE-%s,2026-01-02,2031-01-02,1000000,USD,0.03,BUY
+                """.formatted(suffix);
+        var upload = api.upload("/api/uploads", "twice_" + suffix + ".csv", csv.getBytes(StandardCharsets.UTF_8));
+        String uploadId = upload.json().get("uploadId").asString();
+        Map<String, Object> payload = Map.of("uploadId", uploadId, "force", false,
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)));
+
+        assertThat(api.post("/api/imports", api.toJson(payload)).json().get("status").asString())
+                .isEqualTo("SUCCEEDED");
+        var again = api.post("/api/imports", api.toJson(payload));
+
+        assertThat(again.json().get("issues").toString()).contains("DUPLICATE_IMPORT");
+    }
+
+    @Test
+    void repeatedTradeIdInsideTheSheetIsReported() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String csv = """
+                Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction
+                SAME-%s,2026-01-02,2031-01-02,1000000,USD,0.03,BUY
+                SAME-%s,2026-01-03,2031-01-03,2000000,USD,0.04,SELL
+                """.formatted(suffix, suffix);
+
+        var imported = importFile(csv, "samekey_" + suffix + ".csv", productCode);
+
+        assertThat(imported.json().get("status").asString()).isEqualTo("SUCCEEDED");
+        assertThat(imported.json().get("issues").toString())
+                .contains("KEY_DUPLICATE")
+                .contains("appears 2 times in the sheet")
+                .doesNotContain("already exists");
+    }
+
+    @Test
+    void dataEndRowLimitsTheImportedRows() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String csv = """
+                Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction
+                END-%s-1,2026-01-02,2031-01-02,1000000,USD,0.03,BUY
+                END-%s-2,2026-01-03,2031-01-03,2000000,USD,0.04,SELL
+                END-%s-3,2026-01-04,2031-01-04,3000000,USD,0.05,BUY
+                """.formatted(suffix, suffix, suffix);
+        var upload = api.upload("/api/uploads", "endrow_" + suffix + ".csv",
+                csv.getBytes(StandardCharsets.UTF_8));
+        String uploadId = upload.json().get("uploadId").asString();
+
+        // header row 1, data starts at row 2: ending at row 3 keeps the first two data rows
+        var preview = api.post("/api/uploads/" + uploadId + "/preview", api.toJson(Map.of(
+                "sheetIndex", 0, "productCode", productCode, "dataStartRow", 2, "dataEndRow", 3)));
+        assertThat(preview.ok()).as(preview.body()).isTrue();
+        JsonNode sheet = preview.json().get("preview");
+        assertThat(sheet.get("stats").get("dataRows").asInt()).isEqualTo(2);
+        assertThat(sheet.get("sampleRows")).hasSize(2);
+
+        var imported = api.post("/api/imports", api.toJson(Map.of(
+                "uploadId", uploadId, "force", false,
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode,
+                        "dataStartRow", 2, "dataEndRow", 3)))));
+        assertThat(imported.ok()).as(imported.body()).isTrue();
+        assertThat(imported.json().get("totalRows").asInt()).isEqualTo(2);
+    }
+
+    @Test
+    void dataEndRowAboveTheStartRowIsRejected() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        var upload = api.upload("/api/uploads", "badrange_" + suffix + ".csv", ("""
+                Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction
+                BAD-%s,2026-01-02,2031-01-02,1000000,USD,0.03,BUY
+                """.formatted(suffix)).getBytes(StandardCharsets.UTF_8));
+
+        var preview = api.post("/api/uploads/" + upload.json().get("uploadId").asString() + "/preview",
+                api.toJson(Map.of("sheetIndex", 0, "productCode", productCode,
+                        "dataStartRow", 5, "dataEndRow", 3)));
+
+        assertThat(preview.json().get("preview").get("valid").asBoolean()).isFalse();
+        assertThat(preview.body()).contains("INVALID_DATA_RANGE");
+    }
+
+    /** Uploads and imports the CSV, returning the import response. */
+    private ApiClient.Response importFile(String csv, String fileName, String productCode) {
+        var upload = api.upload("/api/uploads", fileName, csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(upload.ok()).as(upload.body()).isTrue();
+        return api.post("/api/imports", api.toJson(Map.of(
+                "uploadId", upload.json().get("uploadId").asString(),
+                "force", false,
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
+    }
+
+    @Test
+    void importOptionsControlManagedAndUnmappedColumns() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String csv = """
+                _TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction,Extra Ref
+                OPT-%s,note,OPT-%s,2026-01-02,2031-01-02,1000000,USD,0.03,BUY,ref-1
+                """.formatted(suffix, suffix);
+
+        JsonNode withoutExtras = importCase(csv, "opt_" + suffix + ".csv", productCode, Map.of());
+        assertThat(withoutExtras.get("managed").get("_TestCaseId").asString()).isEqualTo("OPT-" + suffix);
+        assertThat(withoutExtras.get("extras").size()).isZero();
+
+        JsonNode withExtras = importCase(csv, "opt2_" + suffix + ".csv", productCode,
+                Map.of("includeUnmappedColumns", true));
+        assertThat(withExtras.get("managed").get("_Remarks").asString()).isEqualTo("note");
+        assertThat(withExtras.get("extras").get("Extra Ref").asString()).isEqualTo("ref-1");
+
+        JsonNode withoutManaged = importCase(csv, "opt3_" + suffix + ".csv", productCode,
+                Map.of("includeManagedColumns", false));
+        assertThat(withoutManaged.get("managed").size()).isZero();
+        assertThat(withoutManaged.get("testCaseId").asString()).isEqualTo("OPT-" + suffix);
+    }
+
+    /** Imports the CSV with the given extra request flags and returns the first case detail. */
+    private JsonNode importCase(String csv, String fileName, String productCode, Map<String, Object> flags) {
+        var upload = api.upload("/api/uploads", fileName, csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(upload.ok()).as(upload.body()).isTrue();
+        Map<String, Object> payload = new java.util.LinkedHashMap<>(flags);
+        payload.put("uploadId", upload.json().get("uploadId").asString());
+        payload.put("force", false);
+        payload.put("sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)));
+        var imported = api.post("/api/imports", api.toJson(payload));
+        assertThat(imported.ok()).as(imported.body()).isTrue();
+        String batchId = imported.json().get("batches").get(0).get("batchId").asString();
+        var cases = api.get("/api/batches/" + batchId + "/cases?page=1&size=5");
+        String caseId = cases.json().get("items").get(0).get("id").asString();
+        return api.get("/api/cases/" + caseId).json();
+    }
+
+    @Test
+    void sampleLimitGrowsThePreviewedRows() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        StringBuilder csv = new StringBuilder(
+                "Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction\n");
+        for (int i = 0; i < 30; i++) {
+            csv.append("SMP-%s-%d,2026-01-02,2031-01-02,1000,USD,0.03,BUY%n".formatted(suffix, i));
+        }
+        var upload = api.upload("/api/uploads", "sample_" + suffix + ".csv",
+                csv.toString().getBytes(StandardCharsets.UTF_8));
+        String uploadId = upload.json().get("uploadId").asString();
+
+        JsonNode firstPage = api.post("/api/uploads/" + uploadId + "/preview",
+                api.toJson(Map.of("sheetIndex", 0, "productCode", productCode))).json().get("preview");
+        assertThat(firstPage.get("sampleRows")).hasSize(20);
+        assertThat(firstPage.get("stats").get("dataRows").asInt()).isEqualTo(30);
+
+        JsonNode secondPage = api.post("/api/uploads/" + uploadId + "/preview",
+                api.toJson(Map.of("sheetIndex", 0, "productCode", productCode, "sampleLimit", 40)))
+                .json().get("preview");
+        assertThat(secondPage.get("sampleRows")).hasSize(30);
+    }
+
+    @Test
+    void stopAtFirstErrorEndsTheImportAtTheBrokenRow() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String csv = """
+                Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction
+                STOP-%s-1,2026-01-02,2031-01-02,1000,USD,0.03,BUY
+                STOP-%s-2,2026-01-03,2031-01-03,not-a-number,USD,0.04,SELL
+                STOP-%s-3,2026-01-04,2031-01-04,3000,USD,0.05,BUY
+                """.formatted(suffix, suffix, suffix);
+
+        JsonNode stopped = importSheet(csv, "stop_" + suffix + ".csv", productCode,
+                Map.of("stopAtFirstError", true));
+        assertThat(stopped.get("totalRows").asInt()).isEqualTo(1);
+        assertThat(stopped.get("invalidRows").asInt()).isZero();
+        assertThat(stopped.get("issues").toString())
+                .contains("IMPORT_STOPPED")
+                .contains("TYPE_MISMATCH");
+
+        JsonNode continued = importSheet(csv, "stop2_" + suffix + ".csv", productCode,
+                Map.of("stopAtFirstError", false));
+        assertThat(continued.get("totalRows").asInt()).isEqualTo(3);
+        assertThat(continued.get("invalidRows").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void stopAtEmptyRowEndsTheImportAtTheBlankLine() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String csv = """
+                Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction
+                BLANK-%s-1,2026-01-02,2031-01-02,1000,USD,0.03,BUY
+                ,,,,,,
+                BLANK-%s-2,2026-01-04,2031-01-04,3000,USD,0.05,BUY
+                """.formatted(suffix, suffix);
+
+        JsonNode stopped = importSheet(csv, "blank_" + suffix + ".csv", productCode,
+                Map.of("stopAtEmptyRow", true));
+        assertThat(stopped.get("totalRows").asInt()).isEqualTo(1);
+
+        JsonNode continued = importSheet(csv, "blank2_" + suffix + ".csv", productCode,
+                Map.of("stopAtEmptyRow", false));
+        assertThat(continued.get("totalRows").asInt()).isEqualTo(2);
+    }
+
+    /** Uploads and imports the CSV with extra top level request flags, returning the import response. */
+    private JsonNode importSheet(String csv, String fileName, String productCode, Map<String, Object> flags) {
+        var upload = api.upload("/api/uploads", fileName, csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(upload.ok()).as(upload.body()).isTrue();
+        Map<String, Object> payload = new java.util.LinkedHashMap<>(flags);
+        payload.put("uploadId", upload.json().get("uploadId").asString());
+        payload.put("force", false);
+        payload.put("sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)));
+        var imported = api.post("/api/imports", api.toJson(payload));
+        assertThat(imported.ok()).as(imported.body()).isTrue();
+        return imported.json();
+    }
+
+    @Test
     void invalidParamsReturnProblemDetail() {
         var response = api.post("/api/uploads/00000000-0000-0000-0000-000000000000/preview",
                 api.toJson(Map.of("sheetIndex", 0)));
@@ -131,8 +380,8 @@ class ImportFlowTest extends AbstractIntegrationTest {
     void deletingTaskCascades() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String csv = CSV_TEMPLATE.formatted("DEL-" + suffix, "DEL-" + suffix);
-        String productCode = productWithFields("MW", "IRS", List.of("tradeId", "tradeDate", "maturityDate",
-                "notional", "notionalCurrency", "fixedRate", "floatingRate", "direction"));
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "direction"));
         var upload = api.upload("/api/uploads", "del_" + suffix + ".csv", csv.getBytes(StandardCharsets.UTF_8));
         String uploadId = upload.json().get("uploadId").asString();
         var importResponse = api.post("/api/imports", api.toJson(Map.of(

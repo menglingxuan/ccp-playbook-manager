@@ -5,18 +5,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ac.domain.TestSchemas;
 import java.util.List;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class ProductSchemaAssembleTest {
 
     private static FieldDef field(String key, int order, String header, FieldType type, FieldRole role) {
-        return FieldDef.of(key, order, header, List.of(), type, role, false, true, "", "", 1, Set.of());
+        return FieldDef.of(key, order, header, List.of(), type, role, false, true, "", "", 1);
     }
 
     private static FieldDef keyField(String key, int order, String header, FieldType type) {
         return new FieldDef(key, order, header, List.of(), type, FieldRole.BUSINESS, false, true, true, "", "",
-                1, Set.of(), List.of(), List.of());
+                1, List.of(), List.of());
     }
 
     @Test
@@ -39,7 +38,7 @@ class ProductSchemaAssembleTest {
 
         ProductSchema withTag = ProductSchema.assemble("SMALL", "Small", "", List.of(
                 new FieldDef("a", 1, "A", List.of(), FieldType.TEXT, FieldRole.BUSINESS, false, true, false, "",
-                        "", 1, Set.of(), List.of("CLEARING"), List.of()),
+                        "", 1, List.of("CLEARING"), List.of()),
                 field("b", 2, "B", FieldType.TEXT, FieldRole.BUSINESS),
                 field("c", 3, "C", FieldType.TEXT, FieldRole.BUSINESS)));
         assertThat(withTag.schemaHash()).isNotEqualTo(first.schemaHash());
@@ -85,9 +84,9 @@ class ProductSchemaAssembleTest {
     @Test
     void managedColumnsStayOutsideTheTradeBlock() {
         FieldDef managed = new FieldDef("testCaseId", 1, "_TestCaseId", List.of(), FieldType.TEXT,
-                FieldRole.MANAGED, true, false, false, "", "", 1, Set.of(), List.of(), List.of());
+                FieldRole.MANAGED, true, false, false, "", "", 1, List.of(), List.of());
         FieldDef requiredBusiness = new FieldDef("a", 2, "A", List.of(), FieldType.TEXT, FieldRole.BUSINESS,
-                true, true, false, "", "", 1, Set.of(), List.of(), List.of());
+                true, true, false, "", "", 1, List.of(), List.of());
         ProductSchema schema = ProductSchema.assemble("P", "P", "", true, List.of(
                 managed,
                 requiredBusiness,
@@ -110,5 +109,56 @@ class ProductSchemaAssembleTest {
 
         assertThat(lenient.strictMatch()).isFalse();
         assertThat(strict.schemaHash()).isNotEqualTo(lenient.schemaHash());
+    }
+
+    @Test
+    void nonStrictProductsWithDuplicateColumnNamesAreInvalid() {
+        ProductSchema lenient = TestSchemas.duplicateRate();
+
+        assertThat(lenient.hasDuplicateTradeHeaders()).isTrue();
+        assertThat(lenient.duplicateTradeHeaders()).containsExactly("Rate");
+        assertThat(lenient.definitionValid()).isFalse();
+    }
+
+    @Test
+    void strictProductsTolerateDuplicateColumnNames() {
+        ProductSchema strict = TestSchemas.duplicateRateStrict();
+
+        assertThat(strict.hasDuplicateTradeHeaders()).isTrue();
+        assertThat(strict.definitionValid()).isTrue();
+    }
+
+    @Test
+    void uniqueColumnNamesStayValidInBothModes() {
+        ProductSchema lenient = TestSchemas.small();
+        ProductSchema strict = ProductSchema.assemble("SMALL", "Small", "", true, lenient.fields());
+
+        assertThat(lenient.definitionValid()).isTrue();
+        assertThat(strict.definitionValid()).isTrue();
+    }
+
+    @Test
+    void duplicateDetectionIgnoresCaseAndSurroundingSpaces() {
+        ProductSchema schema = ProductSchema.assemble("P", "P", "", List.of(
+                field("a", 1, "Rate", FieldType.DECIMAL, FieldRole.BUSINESS),
+                field("b", 2, " rate ", FieldType.DECIMAL, FieldRole.BUSINESS)));
+
+        assertThat(schema.hasDuplicateTradeHeaders()).isTrue();
+        assertThat(schema.fields()).extracting(FieldDef::displayHeader)
+                .containsExactly("Rate", " rate  (#2)");
+    }
+
+    @Test
+    void managedColumnsNeverBlockTheDefinition() {
+        FieldDef managed = new FieldDef("testCaseId", 1, "_TestCaseId", List.of(), FieldType.TEXT,
+                FieldRole.MANAGED, false, false, false, "", "", 1, List.of(), List.of());
+        FieldDef managedDuplicate = new FieldDef("remarks", 2, "_TestCaseId", List.of(), FieldType.TEXT,
+                FieldRole.MANAGED, false, false, false, "", "", 2, List.of(), List.of());
+        ProductSchema schema = ProductSchema.assemble("P", "P", "", List.of(managed, managedDuplicate,
+                field("a", 3, "A", FieldType.TEXT, FieldRole.BUSINESS)));
+
+        assertThat(schema.hasDuplicateHeaders()).isTrue();
+        assertThat(schema.hasDuplicateTradeHeaders()).isFalse();
+        assertThat(schema.definitionValid()).isTrue();
     }
 }

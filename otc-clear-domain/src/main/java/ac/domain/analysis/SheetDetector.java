@@ -1,6 +1,6 @@
 package ac.domain.analysis;
 
-import ac.domain.layout.SequenceAligner;
+import ac.domain.product.ColumnNames;
 import ac.domain.product.FieldDef;
 import ac.domain.product.ProductSchema;
 import ac.domain.table.RawTable;
@@ -33,45 +33,42 @@ public final class SheetDetector {
         return bestRow;
     }
 
-    /** Returns a 1-based column guess where the trade block starts. */
+    /** Returns a 1-based column guess where the definition region starts. */
     public static int detectTradeStartColumn(ProductSchema schema, RawTable table, int headerRow) {
         int headerIndex = headerRow - 1;
         if (headerIndex < 0 || headerIndex >= table.rowCount()) {
             return 1;
         }
         List<String> headers = table.headerTexts(headerIndex);
+        Set<String> fieldNames = new HashSet<>();
+        for (FieldDef field : schema.fields()) {
+            fieldNames.add(ColumnNames.key(field.header()));
+        }
         for (int column = 0; column < headers.size(); column++) {
             String header = headers.get(column);
             if (header.isBlank()) {
                 continue;
             }
-            for (FieldDef field : schema.tradeFields()) {
-                if (SequenceAligner.matchScore(header, field) >= SequenceAligner.SCORE_ALIAS) {
-                    return column + 1;
-                }
+            if (fieldNames.contains(ColumnNames.key(header))) {
+                return column + 1;
             }
         }
         return 1;
     }
 
-    /** Counts distinct fields matched by the given header texts. */
+    /** Field keys whose column name appears in the given header texts. */
     public static Set<String> matchedFields(ProductSchema schema, List<String> headers) {
-        Set<String> matched = new HashSet<>();
+        Set<String> headerKeys = new HashSet<>();
         for (String header : headers) {
             if (header == null || header.isBlank()) {
                 continue;
             }
-            FieldDef bestField = null;
-            int bestScore = 0;
-            for (FieldDef field : schema.tradeFields()) {
-                int score = SequenceAligner.matchScore(header, field);
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestField = field;
-                }
-            }
-            if (bestField != null) {
-                matched.add(bestField.key());
+            headerKeys.add(ColumnNames.key(header));
+        }
+        Set<String> matched = new HashSet<>();
+        for (FieldDef field : schema.fields()) {
+            if (headerKeys.contains(ColumnNames.key(field.header()))) {
+                matched.add(field.key());
             }
         }
         return matched;

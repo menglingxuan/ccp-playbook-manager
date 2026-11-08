@@ -31,6 +31,11 @@
 同一平台内唯一，数量不限）。`IRS`、`OIS` 等只是出厂种子数据与输入建议。
 产品代码全局唯一，字段只能是所属基产品字段的子集。
 
+产品摘要与运行时产品视图都带 `definitionValid`：非严格模式（`strictMatch=false`）下业务字段列名重复时为 `false`，
+此时该产品不能导入（预览/导入返回 `409 PRODUCT_DEFINITION_INVALID`，`details.duplicateHeaders` 列出重复列名）。
+出厂种子按名称应用该规则：名称含 `Standard` 且声明了重复列名的产品默认开启严格模式，其余产品只保留一份列名并关闭严格模式；
+另有 `IRS_DUP_DRAFT`（非标准、保留重复列名、非严格）用于验证无效状态。
+
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/catalog` | 平台及其基产品（含字段数、产品数、`schemaHash`） |
@@ -74,15 +79,21 @@
 `valueTypeCode` 与 `roleCode` 必须是 `VALUE_TYPE` / `FIELD_ROLE` 中已启用的枚举值；
 `tags` 取自 `FIELD_TAG`。值类型可以是枚举引用的类型（如 `CONV_METHOD`），导入时按被引用集合的取值校验。
 
-`roleCode` 只有两项：`BUSINESS`（业务字段，参与交易块对齐与必填校验）、`MANAGED`（管理字段，
-允许落在交易块之外，可选或必填）。业务键（Trade ID）由内部 `key_flag` 标记维护，不再作为角色出现。
+`roleCode` 只有两项：`BUSINESS`（业务字段，参与交易块映射与必填校验）、`MANAGED`（管理字段，可选或必填，
+只有声明过的管理字段才会被识别为管理列）。业务键（Trade ID）由内部 `key_flag` 标记维护，不再作为角色出现。
 
 派生产品继承全部字段，且所有 `BUSINESS` 字段恒为必填；`sortOrder` 不能与同一定义中的其他字段重复（冲突返回 `409`）。
 
-`strictMatch` 为 true 时，导入的交易块必须与产品业务字段顺序、数量完全一致，否则返回 `STRICT_ORDER_MISMATCH` 并拒绝该 sheet。
+`strictMatch` 为 true 时，导入按**位置**匹配：从「定义起始列号」开始，定义区必须与产品的**全部字段**
+（`BUSINESS` + `MANAGED`，按声明顺序）顺序、数量、列名完全一致，否则返回 `STRICT_ORDER_MISMATCH`
+（区内出现产品未定义的列时为 `TRADE_BLOCK_NOT_CONTIGUOUS`）并拒绝该 sheet；定义区之外的列一律归为未映射列。
+为 false 时按**列名**匹配：业务字段自定义起始列号起按列名匹配、已声明的管理字段按列名在整个表头匹配，
+其余列为未映射列；此时产品字段列名重复会使产品定义无效（`definitionValid=false`），预览与导入返回
+`409 PRODUCT_DEFINITION_INVALID`。文件侧重复列名只给 `DUPLICATE_SOURCE_HEADER` 警告，仅首个同名列参与映射。
 
-`MW / CCSIRS` 出厂预置 70 个字段：4 个 `MANAGED` 字段（`_TestCaseId`、`_Remarks`、`Scenario Group`、
-`Priority`）加 66 个业务字段，其中前 50 个为必填。
+出厂种子：`MW / IRS` 26 个字段（`_TestCaseId`、`_Remarks` + 24 业务字段）、`MW / OIS` 22 个字段
+（`_TestCaseId`、`_Remarks` + 20 业务字段）、`MW / CCSIRS` 70 个字段（4 个 `MANAGED` 字段
+`_TestCaseId`、`_Remarks`、`Scenario Group`、`Priority` + 66 个业务字段，其中前 50 个为必填）。
 
 ## 字段元信息
 
@@ -103,8 +114,11 @@
 | --- | --- | --- |
 | POST | `/api/uploads` | multipart `file`，返回 `uploadId` 与 sheet 画像 |
 | GET | `/api/uploads/{id}` | 当前画像 |
-| POST | `/api/uploads/{id}/preview` | 传 `{sheetIndex, productCode, headerRow, tradeStartColumn, dataStartRow}`，返回布局、列分配、样本行、问题列表 |
-| GET | `/api/uploads/{id}/sheets/{index}/raw?rows=20` | 原始单元格（含公式） |
+| POST | `/api/uploads/{id}/preview` | 传 `{sheetIndex, productCode, headerRow, tradeStartColumn, dataStartRow, dataEndRow, sampleLimit}`，返回布局、列分配、样本行、问题列表 |
+| GET | `/api/uploads/{id}/sheets/{index}/raw?rows=20` | 原始单元格（含公式）。未选择产品时向导用它做纯数据预览，不做字段映射 |
+
+`sampleLimit` 只在请求值大于配置 `limits.preview-sample-rows`（默认 20）时生效，上限 500，用于列表滚动分页；
+`stats.dataRows` 始终是整张 sheet 的行数，不受 `sampleLimit` 限制。
 
 `preview` 响应要点：
 
@@ -117,7 +131,7 @@
     "valid": true,
     "issues": [ { "level": "WARN", "code": "DUPLICATE_HEADER_MAPPING", "message": "..." } ],
     "layout": { "headerRow": 3, "dataStartRow": 4, "tradeStartColumn": 3, "tradeEndColumn": 10,
-                "lastColumn": 11, "ambiguous": false, "missingFields": [ ... ] },
+                "lastColumn": 11, "blockContiguous": true, "missingFields": [ ... ] },
     "sampleRows": [ { "row": 4, "values": { "tradeId": "IRS-9001" }, "formulas": { "notional": "=1000000*1" } } ],
     "stats": { "dataRows": 3, "mappedTradeColumns": 8, "managedColumns": 3, "sampleInvalidRows": 0 }
   }
@@ -128,7 +142,22 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/imports` | `{uploadId, sheets:[{sheetIndex, productCode, headerRow, tradeStartColumn, dataStartRow}], force}` |
+| POST | `/api/imports` | `{uploadId, sheets:[{sheetIndex, productCode, headerRow, tradeStartColumn, dataStartRow, dataEndRow}], force, includeManagedColumns, includeUnmappedColumns, stopAtEmptyRow, stopAtFirstError}` |
+
+`includeManagedColumns` 默认 `true`：是否把已声明管理列的取值写入 `managed_json`。
+`includeUnmappedColumns` 默认 `false`：是否把未映射列的取值写入 `extras`。关闭时对应列的公式也一并丢弃
+（公式键与被丢弃的列一一对应）。两个开关只影响落库内容，不影响预览与列归类。
+
+`stopAtEmptyRow` 默认 `false`：遇到空行（整行单元格为空）时停止处理该 sheet，并追加 `IMPORT_STOPPED` 警告；
+关闭时跳过空行继续。`stopAtFirstError`（界面「错误行前停止」）默认 `true`：遇到错误行时**在该行之前**停止——
+该行及其后的行都不导入，该行的具体错误仍写入 `issues`，另追加 `IMPORT_STOPPED` 警告。错误行包括字段校验
+失败的行，以及在开启 `app.import.reject-duplicate-key` 后因 Trade ID 在本 sheet 内重复被拒的行。
+关闭时逐行继续，被拒行计入 `invalidRows`。
+
+导入结果（`ImportResult.issues`）只保留需要处理的问题：预览阶段已经展示过的列映射提示
+（`UNMAPPED_TRADE_COLUMN`、`DUPLICATE_HEADER_MAPPING`、非严格模式的 `TRADE_BLOCK_NOT_CONTIGUOUS`）不再重复。
+`DUPLICATE_IMPORT` 只针对「同一个 upload 的同一个 sheet 被提交两次」；重新上传同一份文件属于新批次，不提示。
+`KEY_DUPLICATE` 只在**同一 sheet 内**业务键重复时提示，不再与历史批次比较。
 | GET | `/api/tasks` | 分页：`status`、`kind`、`product`、`q`、`sort=created|rows|invalid|duration`、`page`、`size` |
 | GET | `/api/tasks/summary` | 各状态任务数 |
 | GET | `/api/tasks/{id}` | 任务 + 批次 + 问题明细 |

@@ -6,6 +6,7 @@ import ac.domain.TestSchemas;
 import ac.domain.TestTables;
 import ac.domain.casefile.IssueLevel;
 import ac.domain.casefile.ValidationIssue;
+import ac.domain.layout.ColumnAssignment;
 import ac.domain.layout.ColumnKind;
 import ac.domain.product.FieldDef;
 import ac.domain.product.ProductSchema;
@@ -43,7 +44,9 @@ class SheetAnalyzerTest {
         assertThat(preview.layout()).isNotNull();
         assertThat(preview.layout().headerRow()).isEqualTo(2);
         assertThat(preview.layout().tradeStartColumn()).isEqualTo(2);
-        assertThat(preview.layout().assignmentsOf(ColumnKind.MANAGED)).hasSize(1);
+        assertThat(preview.layout().assignmentsOf(ColumnKind.MANAGED)).isEmpty();
+        assertThat(preview.layout().assignmentsOf(ColumnKind.UNMAPPED)).extracting(ColumnAssignment::header)
+                .containsExactly("_TestCaseId");
         assertThat(preview.sampleRows()).hasSize(2);
         assertThat(preview.sampleRows().get(0).values()).containsEntry("tradeId", "T-1");
         assertThat(preview.stats().dataRows()).isEqualTo(2);

@@ -1,6 +1,7 @@
 package ac.core.service.product;
 
 import ac.core.common.ApiException;
+import ac.core.common.ErrorCode;
 import ac.core.persistence.BaseProductRepository;
 import ac.core.persistence.ProductRepository;
 import ac.domain.product.FieldDef;
@@ -63,6 +64,25 @@ public class ProductCatalog {
         }
         return find(tenantId, code).orElseThrow(
                 () -> ApiException.notFound("Unknown product '" + code + "'"));
+    }
+
+    /**
+     * Resolves a product that may be used for an import.
+     *
+     * @throws ApiException {@code PRODUCT_DEFINITION_INVALID} when the definition cannot map columns
+     */
+    public ProductSchema requireImportable(String tenantId, String code) {
+        ProductSchema schema = require(tenantId, code);
+        if (!schema.definitionValid()) {
+            throw new ApiException(ErrorCode.PRODUCT_DEFINITION_INVALID,
+                    "Product '" + schema.code() + "' cannot be imported: the column name(s) "
+                            + String.join(", ", schema.duplicateTradeHeaders())
+                            + " are declared more than once while strict matching is off."
+                            + " Remove the duplicated column or enable strict matching.",
+                    Map.of("productCode", schema.code(),
+                            "duplicateHeaders", schema.duplicateTradeHeaders()));
+        }
+        return schema;
     }
 
     public FieldDef requireField(String tenantId, String productCode, String fieldKey) {

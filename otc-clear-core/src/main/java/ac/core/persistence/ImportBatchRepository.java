@@ -13,10 +13,10 @@ import org.springframework.stereotype.Repository;
 public class ImportBatchRepository {
 
     private static final String COLUMNS = """
-            id, tenant_id, task_id, kind, parent_batch_id, product_code, source_filename, source_sha256,
-            source_type, sheet_name, header_row_index, trade_start_col, trade_end_col, layout_json,
-            column_mapping, schema_hash, status, total_rows, invalid_rows, note, created_by, created_at,
-            updated_at, deleted_at
+            id, tenant_id, task_id, upload_id, kind, parent_batch_id, product_code, source_filename,
+            source_sha256, source_type, sheet_name, header_row_index, trade_start_col, trade_end_col,
+            layout_json, column_mapping, schema_hash, status, total_rows, invalid_rows, note, created_by,
+            created_at, updated_at, deleted_at
             """;
 
     private final JdbcClient jdbc;
@@ -27,18 +27,21 @@ public class ImportBatchRepository {
 
     public void insert(ImportBatchRow row) {
         jdbc.sql("""
-                        INSERT INTO import_batch (id, tenant_id, task_id, kind, parent_batch_id, product_code,
-                            source_filename, source_sha256, source_type, sheet_name, header_row_index,
-                            trade_start_col, trade_end_col, layout_json, column_mapping, schema_hash, status,
-                            total_rows, invalid_rows, note, created_by, created_at, updated_at, deleted_at)
-                        VALUES (:id, :tenantId, :taskId, :kind, :parentBatchId, :productCode,
-                            :sourceFilename, :sourceSha256, :sourceType, :sheetName, :headerRowIndex,
-                            :tradeStartCol, :tradeEndCol, :layoutJson, :columnMapping, :schemaHash, :status,
-                            :totalRows, :invalidRows, :note, :createdBy, :createdAt, :updatedAt, :deletedAt)
+                        INSERT INTO import_batch (id, tenant_id, task_id, upload_id, kind, parent_batch_id,
+                            product_code, source_filename, source_sha256, source_type, sheet_name,
+                            header_row_index, trade_start_col, trade_end_col, layout_json, column_mapping,
+                            schema_hash, status, total_rows, invalid_rows, note, created_by, created_at,
+                            updated_at, deleted_at)
+                        VALUES (:id, :tenantId, :taskId, :uploadId, :kind, :parentBatchId,
+                            :productCode, :sourceFilename, :sourceSha256, :sourceType, :sheetName,
+                            :headerRowIndex, :tradeStartCol, :tradeEndCol, :layoutJson, :columnMapping,
+                            :schemaHash, :status, :totalRows, :invalidRows, :note, :createdBy, :createdAt,
+                            :updatedAt, :deletedAt)
                         """)
                 .param("id", row.id())
                 .param("tenantId", row.tenantId())
                 .param("taskId", row.taskId())
+                .param("uploadId", row.uploadId())
                 .param("kind", row.kind())
                 .param("parentBatchId", row.parentBatchId())
                 .param("productCode", row.productCode())
@@ -119,13 +122,21 @@ public class ImportBatchRepository {
         return jdbc.sql(sql.toString()).params(params).query(Long.class).single();
     }
 
-    public boolean existsActiveImport(String tenantId, String sourceSha256, String sheetName) {
+    /**
+     * True when the given upload already produced an active import batch for that sheet, which means
+     * the very same submission was committed twice. Importing an identical file again creates a new
+     * upload and is therefore not a duplicate.
+     */
+    public boolean existsActiveImportForUpload(String tenantId, String uploadId, String sheetName) {
+        if (uploadId == null || uploadId.isBlank()) {
+            return false;
+        }
         return jdbc.sql("""
                         SELECT COUNT(*) FROM import_batch
-                        WHERE tenant_id = :tenantId AND source_sha256 = :sha AND sheet_name = :sheetName
+                        WHERE tenant_id = :tenantId AND upload_id = :uploadId AND sheet_name = :sheetName
                           AND kind = 'IMPORT' AND status = 'ACTIVE'
                         """)
-                .param("tenantId", tenantId).param("sha", sourceSha256).param("sheetName", sheetName)
+                .param("tenantId", tenantId).param("uploadId", uploadId).param("sheetName", sheetName)
                 .query(Long.class).single() > 0;
     }
 
@@ -171,6 +182,7 @@ public class ImportBatchRepository {
                 rs.getString("id"),
                 rs.getString("tenant_id"),
                 rs.getString("task_id"),
+                rs.getString("upload_id"),
                 rs.getString("kind"),
                 rs.getString("parent_batch_id"),
                 rs.getString("product_code"),

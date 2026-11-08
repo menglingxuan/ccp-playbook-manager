@@ -164,7 +164,10 @@ function renderProductRows() {
         <td>${ui.escapeHtml(product.name)}</td>
         <td class="num">${product.fieldCount}</td>
         <td class="num">${product.caseCount}</td>
-        <td>${ui.statusBadge(product.status)}</td>
+        <td>${product.definitionValid
+    ? ui.statusBadge(product.status)
+    : `<span class="badge fail" title="${ui.escapeHtml(t('products.products.invalidHint'))}">${
+      ui.escapeHtml(t('products.products.invalidBadge'))}</span>`}</td>
         <td class="col-switch">${strictSwitch(product)}</td>
         <td>
           <div class="row-actions">
@@ -199,9 +202,15 @@ async function toggleStrictMode(product, input) {
   const target = input.checked;
   input.closest('.switch')?.classList.toggle('on', target);
   try {
-    await api.patch(`/api/catalog/products/${product.id}`, { strictMatch: target });
-    product.strictMatch = target;
-    ui.toast(target ? t('products.toast.strictOn') : t('products.toast.strictOff'), 'ok');
+    const response = await api.patch(`/api/catalog/products/${product.id}`, { strictMatch: target });
+    const updated = response.product || { strictMatch: target };
+    product.strictMatch = updated.strictMatch;
+    product.definitionValid = updated.definitionValid;
+    renderProductRows();
+    if (state.productId === product.id && drawerTable) {
+      drawerTable.setDuplicateSeverity(product.strictMatch ? 'warn' : 'error');
+    }
+    ui.toast(t(target ? 'products.toast.strictOn' : 'products.toast.strictOff'), 'ok');
   } catch (error) {
     input.checked = !target;
     input.closest('.switch')?.classList.toggle('on', !target);
@@ -814,7 +823,9 @@ function renderDrawer(detail) {
         <div class="panel-title-block">
           <h3>${ui.escapeHtml(product.code)} · ${ui.escapeHtml(product.name)}</h3>
           <div class="panel-sub">${ui.escapeHtml(t('common.fields'))} ${product.fieldCount}
-            · ${ui.escapeHtml(t('common.cases'))} ${product.caseCount}</div>
+            · ${ui.escapeHtml(t('common.cases'))} ${product.caseCount}${
+  product.definitionValid ? '' : ` · <span class="badge fail">${ui.escapeHtml(
+    t('products.products.invalidBadge'))}</span>`}</div>
         </div>
         <button class="modal-close" aria-label="${ui.escapeHtml(t('common.close'))}">×</button>
       </div>
@@ -900,6 +911,7 @@ function renderDrawer(detail) {
     root: overlay.querySelector('#productFieldTable'),
     showBaseOrder: true,
     locked: state.drawerLocked,
+    duplicateSeverity: product.strictMatch ? 'warn' : 'error',
     onEdit: (field) => openProductFieldEditor(product, field),
     onDelete: (field) => removeProductField(product, field),
     onReorder: (fieldIds) => reorderProductFields(product.id, fieldIds),

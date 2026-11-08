@@ -52,8 +52,9 @@ class RowConverterTest {
                 .containsEntry("floatingRate", new BigDecimal("0.0425"))
                 .doesNotContainKey("bogus");
         assertThat(row.managed()).containsEntry("_Remarks", "first")
+                .doesNotContainKey("Trailing");
+        assertThat(row.extras()).containsEntry("Bogus", "unmapped")
                 .containsEntry("Trailing", "tail");
-        assertThat(row.extras()).containsEntry("Bogus", "unmapped");
         assertThat(row.keyValue()).isEqualTo("IRS-0001");
         assertThat(row.originalRecordId()).hasSize(32);
         assertThat(row.businessRecordId()).hasSize(32);

@@ -12,6 +12,7 @@ import java.util.List;
  * @param description       description
  * @param schemaHash        definition fingerprint
  * @param duplicateHeaders  true when the product declares duplicated headers
+ * @param definitionValid   true when imports can map every column of the definition
  * @param fields            ordered fields
  */
 public record ProductView(
@@ -20,6 +21,7 @@ public record ProductView(
         String description,
         String schemaHash,
         boolean duplicateHeaders,
+        boolean definitionValid,
         List<FieldView> fields) {
 
     public ProductView {
@@ -63,6 +65,7 @@ public record ProductView(
 
     public static ProductView of(ProductSchema schema) {
         return new ProductView(schema.code(), schema.name(), schema.description(), schema.schemaHash(),
-                schema.hasDuplicateHeaders(), schema.fields().stream().map(FieldView::of).toList());
+                schema.hasDuplicateHeaders(), schema.definitionValid(),
+                schema.fields().stream().map(FieldView::of).toList());
     }
 }

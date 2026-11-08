@@ -71,22 +71,11 @@ public record ProductSchema(
             if (!keys.add(field.key())) {
                 throw new IllegalStateException("Duplicate field key '" + field.key() + "' in " + code);
             }
-            String normalizedHeader = HeaderNormalizer.normalize(field.header());
-            int occurrence = headerCounts.merge(normalizedHeader, 1, Integer::sum);
-
-            Set<String> normalizedNames = new LinkedHashSet<>();
-            normalizedNames.add(normalizedHeader);
-            for (String alias : field.aliases()) {
-                String normalizedAlias = HeaderNormalizer.normalize(alias);
-                if (!normalizedAlias.isEmpty()) {
-                    normalizedNames.add(normalizedAlias);
-                }
-            }
+            int occurrence = headerCounts.merge(ColumnNames.key(field.header()), 1, Integer::sum);
 
             FieldDef def = new FieldDef(field.key(), field.order(), field.header(), field.aliases(),
                     field.type(), field.role(), field.required(), field.businessKey(), field.keyField(),
-                    field.format(), field.clonePattern(), occurrence, normalizedNames, field.tags(),
-                    field.enumValues());
+                    field.format(), field.clonePattern(), occurrence, field.tags(), field.enumValues());
 
             if (def.isKey()) {
                 if (uniqueField != null) {
@@ -165,6 +154,30 @@ public record ProductSchema(
 
     public boolean hasDuplicateHeaders() {
         return fields.stream().anyMatch(FieldDef::hasDuplicateHeader);
+    }
+
+    /** True when two trade fields declare the same column name. */
+    public boolean hasDuplicateTradeHeaders() {
+        return tradeFields().stream().anyMatch(FieldDef::hasDuplicateHeader);
+    }
+
+    /** Distinct column names declared more than once by trade fields, in declaration order. */
+    public List<String> duplicateTradeHeaders() {
+        return tradeFields().stream()
+                .filter(FieldDef::hasDuplicateHeader)
+                .map(FieldDef::header)
+                .distinct()
+                .toList();
+    }
+
+    /**
+     * A product can only be imported when its definition maps every column to a single field.
+     *
+     * <p>Strict mode matches by position and therefore tolerates duplicated column names; the
+     * name based mode of a non strict product cannot tell two equally named columns apart.
+     */
+    public boolean definitionValid() {
+        return strictMatch || !hasDuplicateTradeHeaders();
     }
 
     public List<String> headers() {

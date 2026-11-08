@@ -7,7 +7,6 @@ import ac.domain.product.FieldRole;
 import ac.domain.product.ProductSchema;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /** Turns persisted product definition rows into runtime {@link ProductSchema} instances. */
@@ -46,6 +45,6 @@ public class ProductSchemaMapper {
                 ? FieldRole.MANAGED : FieldRole.BUSINESS;
         return new FieldDef(key, sortOrder, header, aliases, spec.fieldType(), role, required, businessKey,
                 keyFlag, formatHint == null ? "" : formatHint, clonePattern == null ? "" : clonePattern, 1,
-                Set.of(), tags, spec.enumValues());
+                tags, spec.enumValues());
     }
 }

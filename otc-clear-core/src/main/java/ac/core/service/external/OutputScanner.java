@@ -159,7 +159,7 @@ public class OutputScanner {
         String batchId = Ids.newId();
         LocalDateTime now = time.nowUtc();
         List<CaseRow> rows = analysis.rows();
-        batchRepository.insert(new ImportBatchRow(batchId, tenantId, taskId, "EXTERNAL_OUTPUT", null,
+        batchRepository.insert(new ImportBatchRow(batchId, tenantId, taskId, null, "EXTERNAL_OUTPUT", null,
                 schema.code(), file.getFileName().toString(), sha, "CSV", table.sheetName(), layout.headerRow(),
                 layout.tradeStartColumn(), layout.tradeEndColumn(), null, null, schema.schemaHash(), "ACTIVE",
                 rows.size(), analysis.invalidRows(), "External output of job " + job.id(), "system", now, now,

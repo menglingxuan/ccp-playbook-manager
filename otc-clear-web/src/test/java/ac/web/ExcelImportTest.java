@@ -26,8 +26,8 @@ class ExcelImportTest extends AbstractIntegrationTest {
     void detectsOffsetHeaderAndCapturesFormulas() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         byte[] workbook = buildWorkbook("IRS-" + suffix);
-        String productCode = productWithFields("MW", "IRS", List.of("tradeId", "tradeDate", "maturityDate",
-                "notional", "notionalCurrency", "fixedRate", "floatingRate", "direction", "portfolio"));
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "direction", "portfolio"));
 
         var upload = api.upload("/api/uploads", "book_" + suffix + ".xlsx", workbook);
         assertThat(upload.ok()).as(upload.body()).isTrue();
@@ -81,7 +81,7 @@ class ExcelImportTest extends AbstractIntegrationTest {
 
             Row header = sheet.createRow(2);
             String[] headers = {"_TestCaseId", "_Remarks", "Trade ID", "Trade Date", "Maturity Date",
-                    "Notional", "Notional Currency", "Rate", "Rate", "Direction", "Portfolio"};
+                    "Notional", "Notional Currency", "Rate", "Direction", "Portfolio"};
             for (int index = 0; index < headers.length; index++) {
                 header.createCell(index).setCellValue(headers[index]);
             }
@@ -102,9 +102,8 @@ class ExcelImportTest extends AbstractIntegrationTest {
             row.createCell(5).setCellFormula("250000*1");
             row.createCell(6).setCellValue("USD");
             row.createCell(7).setCellValue(0.031);
-            row.createCell(8).setCellValue(0.041);
-            row.createCell(9).setCellValue("BUY");
-            row.createCell(10).setCellValue("BOOK-1");
+            row.createCell(8).setCellValue("BUY");
+            row.createCell(9).setCellValue("BOOK-1");
 
             // Evaluate first so the cached values are persisted next to the formula text.
             workbook.getCreationHelper().createFormulaEvaluator().evaluateAll();

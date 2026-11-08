@@ -55,11 +55,11 @@ public class PreviewService {
         PreviewOptions options = new PreviewOptions(
                 value(request.headerRow()),
                 value(request.tradeStartColumn()),
-                value(request.dataStartRow()));
+                value(request.dataStartRow()),
+                value(request.dataEndRow()));
         SheetPreview preview;
         try {
-            preview = SheetAnalyzer.preview(schema, table, options,
-                    properties.getLimits().getPreviewSampleRows());
+            preview = SheetAnalyzer.preview(schema, table, options, sampleLimit(request));
         } catch (TableReadException e) {
             throw ApiException.invalid(e.getMessage());
         }
@@ -122,13 +122,23 @@ public class PreviewService {
 
     private ProductSchema resolveSchema(String tenantId, String requestedCode, RawTable table) {
         if (requestedCode != null && !requestedCode.isBlank()) {
-            return products.require(tenantId, requestedCode);
+            return products.requireImportable(tenantId, requestedCode);
         }
         return guesser.guess(tenantId, table);
     }
 
     private static int value(Integer number) {
         return number == null || number < 0 ? 0 : number;
+    }
+
+    /** Sample rows requested by the wizard, clamped to the configured default and the hard cap. */
+    private int sampleLimit(PreviewRequest request) {
+        int configured = properties.getLimits().getPreviewSampleRows();
+        int requested = value(request.sampleLimit());
+        if (requested <= 0) {
+            return configured;
+        }
+        return Math.min(Math.max(requested, configured), PreviewRequest.MAX_SAMPLE_ROWS);
     }
 
     /** Exposes the detected header row for a given product, used by the wizard hints. */

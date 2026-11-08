@@ -38,7 +38,12 @@ body.theme-sunset { --bg:#1a0f10; --card:#241416; --border:#46262a; --text:#f9e8
 body.theme-neon { --bg:#030a06; --card:#07150c; --border:#123f24; --text:#d6ffe4; --muted:#5fa87a; --accent:#39ff14; --pass:#39ff14; --pass-bg:#0a2e13; --fail:#ff3860; --fail-bg:#3b0d1a; --warn:#ffd60a; --warn-bg:#3a2e06; --surface:#0a2112; --surface-2:#041008; --hover:#0e2f1a; --accent-bg:#0b2915; --indigo-bg:#0b2915; --indigo-fg:#7affa4; --mark-bg:#5a4a08; --bar-bg:#0e2f1a; --num-muted:#4c8a61; --modal-backdrop:rgba(0,10,4,.72); --topbar-from:#021106; --topbar-mid:#0a3d1c; --topbar-to:#39ff14; }
 body.theme-aurora { --bg:#04120f; --card:#0a1f1a; --border:#154334; --text:#d9f5ec; --muted:#6fa89b; --accent:#2dd4bf; --pass:#34d399; --pass-bg:#062b1d; --fail:#fb7185; --fail-bg:#3b1220; --warn:#fbbf24; --warn-bg:#3a2806; --surface:#0e2a23; --surface-2:#071713; --hover:#123a2f; --accent-bg:#0d2c24; --indigo-bg:#0d2c24; --indigo-fg:#7ff0d4; --mark-bg:#8a6d1a; --bar-bg:#123a2f; --num-muted:#5a8c7e; --modal-backdrop:rgba(2,12,9,.65); --topbar-from:#02110c; --topbar-mid:#0f766e; --topbar-to:#7c3aed; }
 
-/* contrast colour drawn on top of the accent colour (checked boxes, switches) */
+/* contrast colour drawn on top of the accent colour (checked boxes, switches, primary buttons) */
 :root { --on-accent: #ffffff; }
+body.theme-dark { --on-accent: #071427; }
+body.theme-midnight { --on-accent: #0b1024; }
 body.theme-graphite { --on-accent: #1c1200; }
+body.theme-violet { --on-accent: #1b0b2e; }
+body.theme-sunset { --on-accent: #2b0a10; }
 body.theme-neon { --on-accent: #04230c; }
+body.theme-aurora { --on-accent: #032019; }

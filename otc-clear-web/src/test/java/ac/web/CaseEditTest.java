@@ -12,9 +12,9 @@ import org.junit.jupiter.api.Test;
 class CaseEditTest extends AbstractIntegrationTest {
 
     private static final String CSV = """
-            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction
-            %s,2026-01-02,2031-01-02,1000000,USD,0.03,0.04,BUY
-            %s-B,2026-01-03,2031-01-03,2000000,USD,0.05,0.06,SELL
+            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction,Trade State
+            %s,2026-01-02,2031-01-02,1000000,USD,0.03,BUY,PENDING
+            %s-B,2026-01-03,2031-01-03,2000000,USD,0.05,SELL,PENDING
             """;
 
     @Test
@@ -51,12 +51,14 @@ class CaseEditTest extends AbstractIntegrationTest {
     }
 
     private String importCsv(String tradeId) {
+        String productCode = productWithFields("MW", "IRS", List.of("tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "direction", "tradeState", "testCaseId", "remarks"));
         var upload = api.upload("/api/uploads", "edit_" + tradeId + ".csv",
                 CSV.formatted(tradeId, tradeId).getBytes(StandardCharsets.UTF_8));
         String uploadId = upload.json().get("uploadId").asString();
         var importResponse = api.post("/api/imports", api.toJson(Map.of(
                 "uploadId", uploadId, "force", false,
-                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", "IRS")))));
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
         assertThat(importResponse.ok()).as(importResponse.body()).isTrue();
         return importResponse.json().get("batches").get(0).get("batchId").asString();
     }

@@ -18,6 +18,7 @@ export function createFieldTable(config) {
     root,
     showBaseOrder = false,
     locked: initialLocked = true,
+    duplicateSeverity: initialDuplicateSeverity = 'warn',
     onEdit,
     onDelete,
     onReorder,
@@ -30,6 +31,9 @@ export function createFieldTable(config) {
     options: {},
     fields: [],
     locked: initialLocked,
+    // warn: duplicated column names are legal (strict matching disambiguates them),
+    // error: name matching cannot map them, so the definition is invalid
+    duplicateSeverity: initialDuplicateSeverity,
     filters: { query: '', valueType: '', role: '', tag: '', requiredOnly: false },
     sort: { key: null, dir: 0 },
     selectedId: null,
@@ -226,14 +230,15 @@ export function createFieldTable(config) {
     if (!host) {
       return;
     }
+    const blocking = state.duplicateSeverity === 'error';
     const parts = [];
     if (duplicates.size) {
       const names = state.fields
         .filter((field) => duplicates.has(normalize(field.header)))
         .map((field) => field.header);
       const unique = [...new Set(names)];
-      parts.push(`<span class="notice-chip dup">${ui.escapeHtml(
-        t('products.dup.banner', unique.join(' / ')))}</span>`);
+      parts.push(`<span class="notice-chip dup${blocking ? ' error' : ''}">${ui.escapeHtml(
+        t(blocking ? 'products.dup.errorBanner' : 'products.dup.banner', unique.join(' / ')))}</span>`);
     }
     if (!state.locked && isViewModified()) {
       parts.push(`<span class="notice-chip">${ui.escapeHtml(t('products.field.dragBlocked'))}</span>`);
@@ -291,19 +296,24 @@ export function createFieldTable(config) {
     body.innerHTML = fields
       .map((field) => {
         const duplicate = duplicates.has(normalize(field.header));
+        const blocking = duplicate && state.duplicateSeverity === 'error';
         const selected = state.selectedId === field.id ? 'selected' : '';
         const grip = canDrag
           ? `<span class="drag-grip" title="${ui.escapeHtml(t('products.dragHint'))}">${ui.icon('grip', 12)}</span>`
           : '';
         const dupBadge = duplicate
-          ? ` <span class="badge mark dup-badge" title="${ui.escapeHtml(t('products.dup.hint'))}">${
+          ? ` <span class="badge mark dup-badge" title="${ui.escapeHtml(
+            t(blocking ? 'products.dup.errorHint' : 'products.dup.hint'))}">${
             ui.escapeHtml(t('products.dup.badge'))}</span>`
           : '';
         const baseOrderCell = showBaseOrder
           ? `<td class="num col-no parent-no">${field.baseSortOrder ?? field.sortOrder}</td>`
           : '';
+        const rowClass = [duplicate ? 'dup-row' : '', blocking ? 'dup-error' : '', selected]
+          .filter(Boolean)
+          .join(' ');
         return `
-        <tr data-field="${field.id}" draggable="${canDrag}" class="${duplicate ? 'dup-row' : ''} ${selected}">
+        <tr data-field="${field.id}" draggable="${canDrag}" class="${rowClass}">
           <td class="num col-no">${grip}<span class="no-value">${field.sortOrder}</span></td>
           ${baseOrderCell}
           <td class="col-header">${ui.escapeHtml(field.header)}${dupBadge}</td>
@@ -595,6 +605,11 @@ export function createFieldTable(config) {
       if (node('lock')) {
         node('lock').setAttribute('aria-pressed', String(!state.locked));
       }
+    },
+    /** Switches the duplicate highlighting between a warning and a blocking error. */
+    setDuplicateSeverity(severity) {
+      state.duplicateSeverity = severity === 'error' ? 'error' : 'warn';
+      renderRows();
     },
     isLocked() {
       return state.locked;

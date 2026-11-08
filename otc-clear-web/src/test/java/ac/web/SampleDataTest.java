@@ -21,6 +21,11 @@ class SampleDataTest extends AbstractIntegrationTest {
     void wideWorksheetKeepsSeventyColumnsAndTwoHundredRows() throws IOException {
         SampleWorkbookGenerator.generate(samples);
         byte[] workbook = Files.readAllBytes(samples.resolve("irs_workbook.xlsx"));
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "effectiveDate", "maturityDate", "notional", "notionalCurrency", "fixedRate",
+                "fixedFrequency", "floatingFrequency", "dayCount", "businessDayConvention", "paymentCalendar",
+                "clearingHouse", "clearingMember", "account", "counterparty", "direction", "upi",
+                "reportingParty", "tradeState", "novationDate", "portfolio", "usPerson"));
 
         var upload = api.upload("/api/uploads", "irs_workbook.xlsx", workbook);
         assertThat(upload.ok()).as(upload.body()).isTrue();
@@ -38,10 +43,10 @@ class SampleDataTest extends AbstractIntegrationTest {
         assertThat(wideIndex).as("IRS_Wide sheet must exist").isGreaterThanOrEqualTo(0);
 
         var preview = api.post("/api/uploads/" + upload.json().get("uploadId").asString() + "/preview",
-                api.toJson(java.util.Map.of("sheetIndex", wideIndex, "productCode", "IRS")));
+                api.toJson(java.util.Map.of("sheetIndex", wideIndex, "productCode", productCode)));
         assertThat(preview.ok()).as(preview.body()).isTrue();
         JsonNode body = preview.json();
-        assertThat(body.get("productCode").asString()).isEqualTo("IRS");
+        assertThat(body.get("productCode").asString()).isEqualTo(productCode);
 
         JsonNode sheetPreview = body.get("preview");
         assertThat(sheetPreview.get("valid").asBoolean()).isTrue();
@@ -54,18 +59,20 @@ class SampleDataTest extends AbstractIntegrationTest {
 
         JsonNode stats = sheetPreview.get("stats");
         assertThat(stats.get("dataRows").asInt()).isEqualTo(SampleWorkbookGenerator.WIDE_ROW_COUNT);
-        assertThat(stats.get("mappedTradeColumns").asInt()).isEqualTo(24);
-        assertThat(stats.get("managedColumns").asInt()).isEqualTo(46);
+        assertThat(stats.get("mappedTradeColumns").asInt()).isEqualTo(23);
+        assertThat(stats.get("managedColumns").asInt()).isEqualTo(2);
 
         JsonNode sample = sheetPreview.get("sampleRows").get(0);
         assertThat(sample.get("values").get("tradeId").asString()).isEqualTo("IRS-W-0001");
         assertThat(sample.get("formulas").get("notional").asString()).isEqualTo("=1012500.00*1");
-        assertThat(sample.get("managed").get("Booking System").asString()).isNotEmpty();
+        assertThat(sample.get("managed").get("_Remarks").asString()).isNotEmpty();
+        // columns outside the product definition never become managed columns
+        assertThat(sample.get("extras").get("Booking System").asString()).isNotEmpty();
 
         var imported = api.post("/api/imports", api.toJson(java.util.Map.of(
                 "uploadId", upload.json().get("uploadId").asString(),
                 "force", false,
-                "sheets", List.of(java.util.Map.of("sheetIndex", wideIndex, "productCode", "IRS")))));
+                "sheets", List.of(java.util.Map.of("sheetIndex", wideIndex, "productCode", productCode)))));
         assertThat(imported.ok()).as(imported.body()).isTrue();
         assertThat(imported.json().get("status").asString()).isEqualTo("SUCCEEDED");
         assertThat(imported.json().get("totalRows").asInt())

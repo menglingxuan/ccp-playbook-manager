@@ -12,27 +12,50 @@ import tools.jackson.databind.JsonNode;
 /** Strict matching switch, unique field order and the required business fields of products. */
 class ProductStrictModeTest extends AbstractIntegrationTest {
 
-    private static final List<String> FIELDS = List.of("tradeId", "tradeDate", "maturityDate", "notional",
-            "notionalCurrency", "fixedRate", "floatingRate", "direction");
+    private static final List<String> FIELDS = List.of("testCaseId", "remarks", "tradeId", "tradeDate",
+            "maturityDate", "notional", "notionalCurrency", "fixedRate", "floatingRate", "direction");
+
+    /** Same columns without the duplicated {@code Rate}; usable without strict matching. */
+    private static final List<String> UNIQUE_FIELDS = List.of("testCaseId", "remarks", "tradeId", "tradeDate",
+            "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction");
+
+    /** Business columns of {@link #UNIQUE_FIELDS}; the first two entries are managed columns. */
+    private static final int UNIQUE_TRADE_COLUMNS = 7;
 
     private static final String ORDERED_CSV = """
-            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction
-            %s,2026-01-02,2031-01-02,1000000,USD,0.03,0.04,BUY
+            _TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction
+            %s,note,TC-1,2026-01-02,2031-01-02,1000000,USD,0.03,0.04,BUY
             """;
 
     private static final String SWAPPED_CSV = """
-            Trade ID,Maturity Date,Trade Date,Notional,Notional Currency,Rate,Rate,Direction
-            %s,2031-01-02,2026-01-02,1000000,USD,0.03,0.04,BUY
+            _TestCaseId,_Remarks,Trade ID,Maturity Date,Trade Date,Notional,Notional Currency,Rate,Rate,Direction
+            %s,note,TC-1,2031-01-02,2026-01-02,1000000,USD,0.03,0.04,BUY
             """;
 
     private static final String MISSING_COLUMN_CSV = """
-            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate
-            %s,2026-01-02,2031-01-02,1000000,USD,0.03,0.04
+            _TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate
+            %s,note,TC-1,2026-01-02,2031-01-02,1000000,USD,0.03,0.04
             """;
 
     private static final String EXTRA_COLUMN_CSV = """
-            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction,Notes
-            %s,2026-01-02,2031-01-02,1000000,USD,0.03,0.04,BUY,extra
+            _TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction,Notes
+            %s,note,TC-1,2026-01-02,2031-01-02,1000000,USD,0.03,0.04,BUY,extra
+            """;
+
+    private static final String FOREIGN_COLUMN_CSV = """
+            _TestCaseId,_Remarks,Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Bogus,Direction
+            %s,note,TC-1,2026-01-02,2031-01-02,1000000,USD,0.03,0.04,BUY
+            """;
+
+    /** Single {@code Rate} column, so the file can be imported by name without strict matching. */
+    private static final String UNIQUE_CSV = """
+            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction
+            %s,2026-01-02,2031-01-02,1000000,USD,0.03,BUY
+            """;
+
+    private static final String DUPLICATED_RATE_CSV = """
+            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction
+            %s,2026-01-02,2031-01-02,1000000,USD,0.03,0.04,BUY
             """;
 
     @Test
@@ -41,14 +64,13 @@ class ProductStrictModeTest extends AbstractIntegrationTest {
         String productCode = productWithFields("MW", "IRS", FIELDS);
         String productId = productIdOf(productCode);
 
-        var lenient = preview(productCode, EXTRA_COLUMN_CSV.formatted("STR-" + suffix), "extra.csv");
-        assertThat(lenient.json().get("preview").get("valid").asBoolean()).isTrue();
-
         var enabled = api.patch("/api/catalog/products/" + productId,
                 api.toJson(Map.of("strictMatch", true)));
         assertThat(enabled.ok()).as(enabled.body()).isTrue();
         assertThat(enabled.json().get("product").get("strictMatch").asBoolean()).isTrue();
+        assertThat(enabled.json().get("product").get("definitionValid").asBoolean()).isTrue();
 
+        // columns beyond the declared field list stay managed columns
         var extraColumn = preview(productCode, EXTRA_COLUMN_CSV.formatted("STR-" + suffix), "extra2.csv");
         assertThat(extraColumn.json().get("preview").get("valid").asBoolean()).isTrue();
 
@@ -72,10 +94,51 @@ class ProductStrictModeTest extends AbstractIntegrationTest {
                 "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
         assertThat(accepted.json().get("status").asString()).isEqualTo("SUCCEEDED");
 
+        // switching the duplicated definition back to name matching makes it invalid
         var disabled = api.patch("/api/catalog/products/" + productId,
                 api.toJson(Map.of("strictMatch", false)));
         assertThat(disabled.ok()).as(disabled.body()).isTrue();
         assertThat(disabled.json().get("product").get("strictMatch").asBoolean()).isFalse();
+        assertThat(disabled.json().get("product").get("definitionValid").asBoolean()).isFalse();
+    }
+
+    @Test
+    void nonStrictProductWithDuplicateColumnsCannotBeImported() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", FIELDS);
+
+        var response = api.post("/api/uploads/" + upload(ORDERED_CSV.formatted("DUP-" + suffix), "dup.csv")
+                + "/preview", api.toJson(Map.of("sheetIndex", 0, "productCode", productCode)));
+
+        assertThat(response.status()).isEqualTo(409);
+        assertThat(response.json().get("code").asString()).isEqualTo("PRODUCT_DEFINITION_INVALID");
+        assertThat(response.body()).contains("Rate");
+    }
+
+    @Test
+    void strictModeRejectsForeignColumnsInsideTheTradeBlock() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", FIELDS);
+        assertThat(api.patch("/api/catalog/products/" + productIdOf(productCode),
+                api.toJson(Map.of("strictMatch", true))).ok()).isTrue();
+
+        var preview = preview(productCode, FOREIGN_COLUMN_CSV.formatted("CON-" + suffix), "foreign.csv");
+
+        assertThat(preview.json().get("preview").get("valid").asBoolean()).isFalse();
+        assertThat(preview.body()).contains("TRADE_BLOCK_NOT_CONTIGUOUS");
+    }
+
+    @Test
+    void nonStrictModeWarnsAboutDuplicatedSourceColumns() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", UNIQUE_FIELDS);
+
+        var preview = preview(productCode, DUPLICATED_RATE_CSV.formatted("SRC-" + suffix), "dup-src.csv");
+
+        JsonNode sheet = preview.json().get("preview");
+        assertThat(sheet.get("valid").asBoolean()).isTrue();
+        assertThat(preview.body()).contains("DUPLICATE_SOURCE_HEADER");
+        assertThat(sheet.get("stats").get("mappedTradeColumns").asInt()).isEqualTo(UNIQUE_TRADE_COLUMNS);
     }
 
     @Test
@@ -99,13 +162,16 @@ class ProductStrictModeTest extends AbstractIntegrationTest {
         var created = api.post("/api/catalog/base-products/" + baseId + "/products",
                 api.toJson(Map.of("code", productCode, "name", "Full inheritance")));
         assertThat(created.ok()).as(created.body()).isTrue();
-        assertThat(created.json().get("fieldCount").asInt()).isEqualTo(20);
+        assertThat(created.json().get("fieldCount").asInt()).isEqualTo(22);
         assertThat(created.json().get("strictMatch").asBoolean()).isFalse();
 
         String productId = created.json().get("id").asString();
         JsonNode fields = api.get("/api/catalog/products/" + productId).json().get("fields");
-        assertThat(fields).hasSize(20);
+        assertThat(fields).hasSize(22);
         for (JsonNode field : fields) {
+            if (!"BUSINESS".equals(field.get("roleCode").asString())) {
+                continue;
+            }
             assertThat(field.get("required").asBoolean())
                     .as("business field %s must be required", field.get("fieldKey").asString())
                     .isTrue();
@@ -113,7 +179,8 @@ class ProductStrictModeTest extends AbstractIntegrationTest {
 
         JsonNode optional = null;
         for (JsonNode field : fields) {
-            if (!field.get("requiredFromBase").asBoolean()) {
+            if ("BUSINESS".equals(field.get("roleCode").asString())
+                    && !field.get("requiredFromBase").asBoolean()) {
                 optional = field;
                 break;
             }
@@ -169,8 +236,65 @@ class ProductStrictModeTest extends AbstractIntegrationTest {
         assertThat(api.delete("/api/catalog/base-products/" + baseId + "/fields/" + secondId).ok()).isTrue();
     }
 
+    @Test
+    void reorderedProductFieldsStillMatchTheFileByName() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", UNIQUE_FIELDS);
+        String productId = productIdOf(productCode);
+
+        JsonNode fields = api.get("/api/catalog/products/" + productId).json().get("fields");
+        String tradeIdField = fieldIdOf(fields, "tradeId");
+        String tradeDateField = fieldIdOf(fields, "tradeDate");
+        List<String> order = new java.util.ArrayList<>();
+        order.add(tradeDateField);
+        order.add(tradeIdField);
+        for (JsonNode field : fields) {
+            String id = field.get("id").asString();
+            if (!order.contains(id)) {
+                order.add(id);
+            }
+        }
+        var reordered = api.post("/api/catalog/products/" + productId + "/fields/reorder",
+                api.toJson(Map.of("fieldIds", order)));
+        assertThat(reordered.ok()).as(reordered.body()).isTrue();
+
+        var preview = preview(productCode, UNIQUE_CSV.formatted("ORD-" + suffix), "ordered2.csv");
+        JsonNode sheet = preview.json().get("preview");
+        assertThat(sheet.get("valid").asBoolean()).isTrue();
+        assertThat(sheet.get("stats").get("mappedTradeColumns").asInt()).isEqualTo(UNIQUE_TRADE_COLUMNS);
+        assertThat(preview.body()).doesNotContain("MISSING_REQUIRED_FIELD")
+                .doesNotContain("UNMAPPED_TRADE_COLUMN");
+    }
+
     /** Preview result keeping the upload id next to the parsed body. */
     private record Preview(String uploadId, JsonNode json, String body) {
+    }
+
+    @Test
+    void fieldsDroppedByTheProductStayOutsideTheMapping() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS",
+                List.of("tradeId", "tradeDate", "maturityDate", "notional", "fixedRate", "direction"));
+        String csv = """
+                Trade ID,Trade Date,Maturity Date,Notional,Rate,Counterparty,Portfolio,Direction
+                DROP-%s,2026-01-02,2031-01-02,1000000,0.03,CP-1,PF-01,BUY
+                """.formatted(suffix);
+
+        var preview = preview(productCode, csv, "dropped.csv");
+        JsonNode sheet = preview.json().get("preview");
+        assertThat(sheet.get("valid").asBoolean()).isTrue();
+        assertThat(sheet.get("layout").get("missingFields")).isEmpty();
+        assertThat(sheet.get("stats").get("mappedTradeColumns").asInt()).isEqualTo(6);
+        assertThat(preview.body()).doesNotContain("MISSING_REQUIRED_FIELD");
+        assertThat(preview.body()).contains("UNMAPPED_TRADE_COLUMN")
+                .contains("TRADE_BLOCK_NOT_CONTIGUOUS");
+    }
+
+    /** Uploads the CSV and returns the upload id. */
+    private String upload(String csv, String fileName) {
+        var upload = api.upload("/api/uploads", fileName, csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(upload.ok()).as(upload.body()).isTrue();
+        return upload.json().get("uploadId").asString();
     }
 
     private Preview preview(String productCode, String csv, String fileName) {

@@ -35,7 +35,7 @@ public final class ProductViews {
     /** Concrete product summary. */
     public record ProductSummary(String id, String platformCode, String baseProductCode, String code, String name,
             String description, String status, boolean strictMatch, int fieldCount, long caseCount,
-            String schemaHash) {
+            String schemaHash, boolean definitionValid) {
     }
 
     /**

@@ -29,57 +29,79 @@
       <div id="sheetList"></div>
     </aside>
 
+    <div class="wizard-main">
     <section class="panel">
       <div class="panel-head">
         <h3 id="sheetTitle">预览</h3>
         <div class="row-actions">
           <span class="status-lamp" id="validityLamp">等待预览</span>
-          <button class="tool-btn" id="submitAllBtn" disabled>提交全部 Sheet</button>
           <button class="tool-btn primary" id="submitImportBtn" disabled>提交当前 Sheet</button>
         </div>
       </div>
       <div class="panel-body">
-        <div class="params">
+        <div class="params wizard-params">
           <div class="field">
             <label for="productSelect">产品</label>
-            <select id="productSelect"></select>
+            <select id="productSelect">
+              <option value=""></option>
+            </select>
+            <div class="hint hidden" id="productValidityHint"></div>
           </div>
           <div class="field">
-            <label for="headerRow">列名开始行号（1-based）</label>
+            <label for="headerRow">列名行号</label>
             <input type="number" id="headerRow" min="1" step="1">
           </div>
           <div class="field">
-            <label for="tradeStartColumn">交易字段开始列号（1-based）</label>
+            <label for="tradeStartColumn">定义起始列</label>
             <input type="number" id="tradeStartColumn" min="1" step="1">
           </div>
           <div class="field">
-            <label for="dataStartRow">数据开始行（1-based）</label>
+            <label for="dataStartRow">数据起始行</label>
             <input type="number" id="dataStartRow" min="1" step="1">
+          </div>
+          <div class="field">
+            <label for="dataEndRow">数据结束行</label>
+            <input type="number" id="dataEndRow" min="1" step="1" placeholder="末尾">
+          </div>
+          <div class="field">
+            <label>导入选项</label>
+            <div class="setting-list">
+              <label class="setting"><input type="checkbox" id="includeManagedColumns" checked>导入管理列</label>
+              <label class="setting"><input type="checkbox" id="includeUnmappedColumns">导入未映射列</label>
+              <label class="setting"><input type="checkbox" id="stopAtEmptyRow">空行前停止</label>
+              <label class="setting"><input type="checkbox" id="stopAtFirstError" checked>错误行前停止</label>
+            </div>
           </div>
         </div>
 
-        <div class="legend">
+        <div class="legend hidden" id="previewLegend">
           <span class="trade">交易字段</span>
           <span class="managed">管理列</span>
           <span class="unmapped">未映射列</span>
         </div>
 
-        <div class="table-wrap" style="max-height:46vh">
+        <div class="table-wrap" id="previewWrap" style="max-height:46vh">
           <table id="previewTable">
             <thead><tr id="previewHead"></tr></thead>
             <tbody id="previewBody"></tbody>
           </table>
         </div>
+        <div id="previewMore" class="mono-sm preview-more"></div>
 
         <div id="previewStats" class="mono-sm" style="margin-top:10px"></div>
-        <div class="issues" id="previewIssues"></div>
+
+        <details class="issues-panel" id="previewIssuePanel">
+          <summary id="previewIssueSummary">问题</summary>
+          <div class="issues" id="previewIssues"></div>
+        </details>
       </div>
     </section>
-  </section>
 
-  <section class="panel hidden" id="resultPanel" style="margin-top:16px">
-    <div class="panel-head"><h3>导入结果</h3></div>
-    <div class="panel-body" id="resultBody"></div>
+    <section class="panel hidden" id="resultPanel">
+      <div class="panel-head"><h3 id="resultTitle">导入结果</h3></div>
+      <div class="panel-body" id="resultBody"></div>
+    </section>
+    </div>
   </section>
 </main>
 

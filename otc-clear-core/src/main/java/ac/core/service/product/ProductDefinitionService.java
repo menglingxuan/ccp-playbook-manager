@@ -24,11 +24,13 @@ import ac.core.service.product.ProductViews.ProductDetail;
 import ac.core.service.product.ProductViews.ProductFieldView;
 import ac.core.service.product.ProductViews.ProductSummary;
 import ac.domain.product.BaseProductCode;
+import ac.domain.product.ColumnNames;
 import ac.domain.product.FieldRole;
 import ac.domain.product.PlatformCode;
 import ac.domain.product.ProductSchema;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -656,11 +658,26 @@ public class ProductDefinitionService {
     }
 
     private ProductSummary toSummary(String tenantId, ProductRow row) {
-        long fieldCount = productRepository.listFields(tenantId, row.id()).size();
+        List<ProductFieldRow> fields = productRepository.listFields(tenantId, row.id());
         long caseCount = caseRepository.countByProduct(tenantId, row.code());
+        boolean definitionValid = row.strictMatch() || !hasDuplicateTradeHeaders(fields);
         return new ProductSummary(row.id(), row.platformCode(), row.baseProductCode(), row.code(), row.name(),
-                row.description(), row.status(), row.strictMatch(), (int) fieldCount, caseCount,
-                row.schemaHash());
+                row.description(), row.status(), row.strictMatch(), fields.size(), caseCount,
+                row.schemaHash(), definitionValid);
+    }
+
+    /** True when two non managed fields of the product declare the same column name. */
+    private static boolean hasDuplicateTradeHeaders(List<ProductFieldRow> fields) {
+        Set<String> seen = new HashSet<>();
+        for (ProductFieldRow field : fields) {
+            if ("MANAGED".equalsIgnoreCase(field.roleCode())) {
+                continue;
+            }
+            if (!seen.add(ColumnNames.key(field.header()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private BaseFieldView toBaseFieldView(BaseFieldRow field, MetaLookup.Lookup lookup) {

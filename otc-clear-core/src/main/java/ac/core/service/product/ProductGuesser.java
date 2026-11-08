@@ -1,10 +1,8 @@
 package ac.core.service.product;
 
 import ac.domain.analysis.SheetDetector;
-import ac.domain.layout.SequenceAligner;
 import ac.domain.product.ProductSchema;
 import ac.domain.table.RawTable;
-import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Component;
 
@@ -18,27 +16,26 @@ public class ProductGuesser {
         this.products = products;
     }
 
+    /**
+     * Returns the product whose field names cover most headers of the sheet.
+     *
+     * <p>Only products with a valid definition are considered, because an invalid definition cannot
+     * be imported.
+     */
     public ProductSchema guess(String tenantId, RawTable table) {
-        List<ProductSchema> candidates = new ArrayList<>(products.all(tenantId));
         ProductSchema best = null;
         int bestScore = -1;
-        for (ProductSchema candidate : candidates) {
+        for (ProductSchema candidate : products.all(tenantId)) {
+            if (!candidate.definitionValid()) {
+                continue;
+            }
             int headerRow = SheetDetector.detectHeaderRow(candidate, table);
             if (headerRow < 1 || headerRow - 1 >= table.rowCount()) {
                 continue;
             }
-            int startColumn = SheetDetector.detectTradeStartColumn(candidate, table, headerRow);
-            List<String> headers = table.headerTexts(headerRow - 1);
-            int from = Math.max(0, startColumn - 1);
-            int to = Math.min(headers.size(), from + candidate.tradeFields().size());
-            if (to <= from) {
-                continue;
-            }
-            SequenceAligner.Alignment alignment = SequenceAligner.align(headers.subList(from, to),
-                    candidate.tradeFields());
-            int score = alignment.matchCount() * 10 + (int) alignment.score();
-            if (score > bestScore) {
-                bestScore = score;
+            int matched = SheetDetector.matchedFields(candidate, table.headerTexts(headerRow - 1)).size();
+            if (matched > bestScore) {
+                bestScore = matched;
                 best = candidate;
             }
         }
@@ -48,3 +45,4 @@ public class ProductGuesser {
         return best;
     }
 }
+

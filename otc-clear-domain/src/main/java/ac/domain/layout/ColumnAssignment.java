@@ -7,7 +7,6 @@ package ac.domain.layout;
  * @param header      header text as found in the source file
  * @param kind        trade, managed or unmapped
  * @param fieldKey    product field key for {@link ColumnKind#TRADE} columns
- * @param score       aligner score for trade columns, 0 otherwise
  * @param managedKind semantic meaning for managed columns
  * @param managedKey  storage key inside {@code managed_json}
  */
@@ -16,21 +15,20 @@ public record ColumnAssignment(
         String header,
         ColumnKind kind,
         String fieldKey,
-        int score,
         ManagedKind managedKind,
         String managedKey) {
 
-    public static ColumnAssignment trade(int column, String header, String fieldKey, int score) {
-        return new ColumnAssignment(column, header, ColumnKind.TRADE, fieldKey, score, null, null);
+    public static ColumnAssignment trade(int column, String header, String fieldKey) {
+        return new ColumnAssignment(column, header, ColumnKind.TRADE, fieldKey, null, null);
     }
 
     public static ColumnAssignment unmapped(int column, String header) {
-        return new ColumnAssignment(column, header, ColumnKind.UNMAPPED, null, 0, null, null);
+        return new ColumnAssignment(column, header, ColumnKind.UNMAPPED, null, null, null);
     }
 
     public static ColumnAssignment managed(int column, String header, ManagedKind managedKind,
             String managedKey) {
-        return new ColumnAssignment(column, header, ColumnKind.MANAGED, null, 0, managedKind, managedKey);
+        return new ColumnAssignment(column, header, ColumnKind.MANAGED, null, managedKind, managedKey);
     }
 
     public int columnNumber() {

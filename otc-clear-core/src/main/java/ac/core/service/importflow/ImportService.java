@@ -13,11 +13,13 @@ import ac.core.persistence.TestCaseRepository;
 import ac.core.service.audit.AuditService;
 import ac.core.service.cases.CaseJsonCodec;
 import ac.core.service.product.ProductCatalog;
+import ac.domain.analysis.ImportStopPolicy;
 import ac.domain.analysis.PreviewOptions;
 import ac.domain.analysis.SheetAnalysis;
 import ac.domain.analysis.SheetAnalyzer;
 import ac.domain.casefile.CaseRow;
 import ac.domain.casefile.IssueLevel;
+import ac.domain.casefile.UnresolvedFormula;
 import ac.domain.casefile.ValidationIssue;
 import ac.domain.layout.SheetLayout;
 import ac.domain.product.ProductSchema;
@@ -28,7 +30,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,33 @@ public class ImportService {
 
     private static final int INSERT_CHUNK = 500;
     private static final String TASK_KIND = "FILE_UPLOAD";
+
+    /**
+     * Layout problems that make the column mapping impossible, so the whole sheet is rejected.
+     * Missing values stay row level issues: the sheet is still imported with invalid rows.
+     */
+    private static final Set<String> BLOCKING_LAYOUT_CODES = Set.of(
+            "STRICT_ORDER_MISMATCH",
+            "TRADE_BLOCK_NOT_CONTIGUOUS",
+            "DUPLICATE_SOURCE_HEADER",
+            "DUPLICATE_PRODUCT_HEADER");
+
+    /**
+     * Column mapping notes the wizard already shows while previewing; repeating them in the import
+     * result only adds noise. Blocking errors with the same code are always kept.
+     */
+    private static final Set<String> PREVIEW_ONLY_CODES = Set.of(
+            "UNMAPPED_TRADE_COLUMN",
+            "DUPLICATE_HEADER_MAPPING",
+            "TRADE_BLOCK_NOT_CONTIGUOUS");
+
+    private static boolean isBlocking(ac.domain.casefile.ValidationIssue issue) {
+        return issue.level() == IssueLevel.ERROR && BLOCKING_LAYOUT_CODES.contains(issue.code());
+    }
+
+    private static boolean isPreviewOnly(ac.domain.casefile.ValidationIssue issue) {
+        return issue.level() == IssueLevel.WARN && PREVIEW_ONLY_CODES.contains(issue.code());
+    }
 
     private final UploadStore uploadStore;
     private final PreviewService previewService;
@@ -100,20 +128,22 @@ public class ImportService {
                 continue;
             }
             try {
-                ProductSchema schema = products.require(tenantId, selection.productCode());
+                ProductSchema schema = products.requireImportable(tenantId, selection.productCode());
                 RawTable table = previewService.loadFullSheet(tenantId, upload, sheetIndex);
                 PreviewOptions options = new PreviewOptions(selection.headerRowOrAuto(),
-                        selection.tradeStartColumnOrAuto(), selection.dataStartRowOrAuto());
+                        selection.tradeStartColumnOrAuto(), selection.dataStartRowOrAuto(),
+                        selection.dataEndRowOrAuto());
                 SheetAnalysis analysis = SheetAnalyzer.analyze(schema, table, options, upload.fileName(),
-                        properties.getIds().getHashLength(), properties.getIds().isNormalizeFormulaRefs());
-                issues.addAll(analysis.issues());
+                        properties.getIds().getHashLength(), properties.getIds().isNormalizeFormulaRefs(),
+                        new ImportStopPolicy(request.stopAtEmptyRowEnabled(),
+                                request.stopAtFirstErrorEnabled()));
+                issues.addAll(analysis.issues().stream().filter(issue -> !isPreviewOnly(issue)).toList());
 
                 if (analysis.layout() == null) {
                     failedSheets++;
                     continue;
                 }
-                if (analysis.issues().stream()
-                        .anyMatch(issue -> "STRICT_ORDER_MISMATCH".equals(issue.code()))) {
+                if (analysis.issues().stream().anyMatch(issue -> isBlocking(issue))) {
                     failedSheets++;
                     continue;
                 }
@@ -121,26 +151,28 @@ public class ImportService {
                     continue;
                 }
 
-                List<CaseRow> rows = filterDuplicateKeys(tenantId, schema, analysis, issues);
+                DuplicateFilter duplicateFilter = filterDuplicateKeys(analysis, issues,
+                        request.stopAtFirstErrorEnabled());
+                List<CaseRow> rows = duplicateFilter.rows();
                 String batchId = Ids.newId();
                 SheetLayout layout = analysis.layout();
-                batchRepository.insert(new ImportBatchRow(batchId, tenantId, taskId, "IMPORT", null,
-                        schema.code(), upload.fileName(), upload.sha256(), upload.sourceType(), table.sheetName(),
-                        layout.headerRow(), layout.tradeStartColumn(), layout.tradeEndColumn(), layoutJson(layout),
-                        mappingJson(layout), schema.schemaHash(), "ACTIVE", rows.size(),
-                        analysis.invalidRows() + (analysis.rows().size() - rows.size()), null, "system", now, now,
+                int invalid = analysis.invalidRows() + duplicateFilter.rejected();
+                batchRepository.insert(new ImportBatchRow(batchId, tenantId, taskId, upload.uploadId(), "IMPORT",
+                        null, schema.code(), upload.fileName(), upload.sha256(), upload.sourceType(),
+                        table.sheetName(), layout.headerRow(), layout.tradeStartColumn(),
+                        layout.tradeEndColumn(), layoutJson(layout), mappingJson(layout), schema.schemaHash(),
+                        "ACTIVE", rows.size(), invalid, null, "system", now, now,
                         null));
 
                 List<TestCaseRecord> records = new ArrayList<>(rows.size());
                 for (CaseRow row : rows) {
-                    records.add(toRecord(tenantId, batchId, schema, row, now));
+                    records.add(toRecord(tenantId, batchId, schema, row, now, request));
                     issues.addAll(row.issues());
                 }
                 for (int start = 0; start < records.size(); start += INSERT_CHUNK) {
                     caseRepository.insertAll(records.subList(start, Math.min(records.size(), start + INSERT_CHUNK)));
                 }
 
-                int invalid = analysis.invalidRows() + (analysis.rows().size() - rows.size());
                 totalValid += rows.size();
                 totalInvalid += invalid;
                 batches.add(new BatchImportResult(batchId, sheetIndex, table.sheetName(), schema.code(),
@@ -188,33 +220,68 @@ public class ImportService {
         return json.toJson(items);
     }
 
-    private List<CaseRow> filterDuplicateKeys(String tenantId, ProductSchema schema, SheetAnalysis analysis,
-            List<ValidationIssue> issues) {
+    /**
+     * Warns about business keys repeated inside the submitted rows. Keys imported by an earlier batch
+     * are not a duplicate: every import creates its own batch and test data is imported repeatedly.
+     *
+     * <p>Rows whose key already appeared are rejected; with {@code stopAtFirstError} the first such row
+     * also ends the sheet, so the rows behind it are neither imported nor counted as invalid.
+     */
+    private DuplicateFilter filterDuplicateKeys(SheetAnalysis analysis,
+            List<ValidationIssue> issues, boolean stopAtFirstError) {
         List<CaseRow> rows = new ArrayList<>(analysis.rows());
-        List<String> keys = rows.stream().map(CaseRow::keyValue).filter(Objects::nonNull).distinct().toList();
-        if (keys.isEmpty()) {
-            return rows;
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (CaseRow row : rows) {
+            if (row.keyValue() != null) {
+                counts.merge(row.keyValue(), 1L, Long::sum);
+            }
         }
-        List<String> existing = caseRepository.existingKeys(tenantId, schema.code(), keys);
-        if (existing.isEmpty()) {
-            return rows;
-        }
-        existing.stream().limit(10).forEach(key -> issues.add(ValidationIssue.warn("KEY_DUPLICATE",
-                "Trade id '" + key + "' already exists for product " + schema.code())));
-        if (!properties.getImportRules().isRejectDuplicateKey()) {
-            return rows;
-        }
-        List<CaseRow> filtered = rows.stream()
-                .filter(row -> row.keyValue() == null || !existing.contains(row.keyValue()))
+        List<String> repeated = counts.entrySet().stream()
+                .filter(entry -> entry.getValue() > 1)
+                .map(Map.Entry::getKey)
                 .toList();
+        if (repeated.isEmpty()) {
+            return new DuplicateFilter(rows, 0);
+        }
+        repeated.stream().limit(10).forEach(key -> issues.add(ValidationIssue.warn("KEY_DUPLICATE",
+                "Trade id '" + key + "' appears " + counts.get(key) + " times in the sheet")));
+        if (!properties.getImportRules().isRejectDuplicateKey()) {
+            return new DuplicateFilter(rows, 0);
+        }
+        Set<String> seen = new HashSet<>();
+        List<CaseRow> filtered = new ArrayList<>(rows.size());
+        int rejected = 0;
+        CaseRow stoppedAt = null;
+        for (CaseRow row : rows) {
+            if (row.keyValue() == null || seen.add(row.keyValue())) {
+                filtered.add(row);
+                continue;
+            }
+            rejected++;
+            if (stopAtFirstError) {
+                stoppedAt = row;
+                break;
+            }
+        }
         issues.add(ValidationIssue.error("KEY_DUPLICATE",
-                existing.size() + " row(s) rejected because their trade id already exists"));
-        return filtered;
+                rejected + " row(s) rejected because their trade id repeats in the sheet"));
+        if (stoppedAt != null) {
+            issues.add(ValidationIssue.warn("IMPORT_STOPPED",
+                    "Import stopped before row " + stoppedAt.sourceRow() + ": trade id '"
+                            + stoppedAt.keyValue() + "' repeats in the sheet, "
+                            + (rows.size() - filtered.size() - 1) + " row(s) not imported"));
+        }
+        return new DuplicateFilter(filtered, rejected);
+    }
+
+    /** Rows kept after the in-sheet duplicate key filter plus how many rows it rejected. */
+    private record DuplicateFilter(List<CaseRow> rows, int rejected) {
     }
 
     private boolean duplicateImport(String tenantId, StoredUpload upload, RawTable table, SheetAnalysis analysis,
             List<ValidationIssue> issues, boolean force) {
-        if (force || !batchRepository.existsActiveImport(tenantId, upload.sha256(), table.sheetName())) {
+        if (force || !batchRepository.existsActiveImportForUpload(tenantId, upload.uploadId(),
+                table.sheetName())) {
             return false;
         }
         AppProperties.DuplicateAction action = properties.getImportRules().getDuplicateOriginalIdAction();
@@ -222,26 +289,48 @@ public class ImportService {
             return true;
         }
         ValidationIssue issue = ValidationIssue.warn("DUPLICATE_IMPORT",
-                "File '" + upload.fileName() + "' sheet '" + table.sheetName() + "' was already imported");
+                "This upload was already imported for sheet '" + table.sheetName() + "'");
         issues.add(issue);
         if (action == AppProperties.DuplicateAction.ERROR) {
             issues.add(ValidationIssue.error("DUPLICATE_IMPORT",
-                    "Import cancelled because the sheet was already imported").atRow(analysis.layout().headerRow()));
+                    "Import cancelled because this upload was already imported").atRow(
+                            analysis.layout().headerRow()));
             return true;
         }
         return false;
     }
 
     private TestCaseRecord toRecord(String tenantId, String batchId, ProductSchema schema, CaseRow row,
-            LocalDateTime now) {
-        String managedJson = row.managed().isEmpty() ? null : codec.managedJson(row.managed());
-        String extrasJson = row.extras().isEmpty() ? null : codec.extrasJson(row.extras());
-        String formulaJson = row.formulas().isEmpty() && row.unresolvedFormulas().isEmpty()
-                ? null : codec.formulaJson(schema, row.formulas(), row.unresolvedFormulas());
+            LocalDateTime now, ImportCommitRequest request) {
+        Map<String, String> managed = request.managedColumnsEnabled() ? row.managed() : Map.of();
+        Map<String, String> extras = request.unmappedColumnsEnabled() ? row.extras() : Map.of();
+        Map<String, String> formulas = row.formulas();
+        List<UnresolvedFormula> unresolved = row.unresolvedFormulas();
+        if (managed.size() != row.managed().size() || extras.size() != row.extras().size()) {
+            // Managed and unmapped values are dropped: their formulas must not survive either.
+            Set<String> dropped = new HashSet<>();
+            if (managed.size() != row.managed().size()) {
+                dropped.addAll(row.managed().keySet());
+            }
+            if (extras.size() != row.extras().size()) {
+                dropped.addAll(row.extras().keySet());
+            }
+            formulas = formulas.entrySet().stream()
+                    .filter(entry -> !dropped.contains(entry.getKey()))
+                    .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
+                            (left, right) -> left, LinkedHashMap::new));
+            unresolved = unresolved.stream()
+                    .filter(item -> !dropped.contains(item.key()))
+                    .toList();
+        }
+        String managedJson = managed.isEmpty() ? null : codec.managedJson(managed);
+        String extrasJson = extras.isEmpty() ? null : codec.extrasJson(extras);
+        String formulaJson = formulas.isEmpty() && unresolved.isEmpty()
+                ? null : codec.formulaJson(schema, formulas, unresolved);
         return new TestCaseRecord(Ids.newId(), tenantId, batchId, schema.code(), "IMPORT", row.rowNo(),
                 row.sourceRow(), row.testCaseId(), row.testCaseIdSource().name(), row.originalRecordId(),
                 row.businessRecordId(), row.keyValue(), codec.dataJson(schema, row), managedJson, formulaJson,
-                extrasJson, row.formulas().size(), row.searchText(), "ACTIVE", 0, null, now, now);
+                extrasJson, formulas.size(), row.searchText(), "ACTIVE", 0, null, now, now);
     }
 
     private String layoutJson(SheetLayout layout) {
@@ -252,7 +341,7 @@ public class ImportService {
         payload.put("tradeEndColumn", layout.tradeEndColumn());
         payload.put("lastColumn", layout.lastColumn());
         payload.put("missingFields", layout.missingFields());
-        payload.put("ambiguous", layout.ambiguous());
+        payload.put("blockContiguous", layout.blockContiguous());
         return json.toJson(payload);
     }
 
@@ -265,7 +354,6 @@ public class ImportService {
             item.put("kind", assignment.kind().name());
             item.put("fieldKey", assignment.fieldKey());
             item.put("managedKey", assignment.managedKey());
-            item.put("score", assignment.score());
             items.add(item);
         });
         return json.toJson(items);
@@ -280,6 +368,9 @@ public class ImportService {
             item.put("headerRow", selection.headerRowOrAuto());
             item.put("tradeStartColumn", selection.tradeStartColumnOrAuto());
             item.put("dataStartRow", selection.dataStartRowOrAuto());
+            item.put("dataEndRow", selection.dataEndRowOrAuto());
+            item.put("includeManagedColumns", request.managedColumnsEnabled());
+            item.put("includeUnmappedColumns", request.unmappedColumnsEnabled());
             items.add(item);
         }
         return json.toJson(items);

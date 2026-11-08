@@ -25,8 +25,8 @@ import tools.jackson.databind.JsonNode;
 class ExternalJobFlowTest extends AbstractIntegrationTest {
 
     private static final String CSV = """
-            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Direction
-            %s,2026-01-02,2031-01-02,1000000,USD,0.03,0.04,BUY
+            Trade ID,Trade Date,Maturity Date,Notional,Notional Currency,Rate,Direction
+            %s,2026-01-02,2031-01-02,1000000,USD,0.03,BUY
             """;
 
     @TestConfiguration
@@ -66,8 +66,8 @@ class ExternalJobFlowTest extends AbstractIntegrationTest {
     void dispatchesScansAndBrowsesOutputs() throws IOException {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String tradeId = "EXT-" + suffix;
-        String productCode = productWithFields("MW", "IRS", List.of("tradeId", "tradeDate", "maturityDate",
-                "notional", "notionalCurrency", "fixedRate", "floatingRate", "direction"));
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "direction"));
         var upload = api.upload("/api/uploads", "ext_" + suffix + ".csv",
                 CSV.formatted(tradeId).getBytes(StandardCharsets.UTF_8));
         String uploadId = upload.json().get("uploadId").asString();
