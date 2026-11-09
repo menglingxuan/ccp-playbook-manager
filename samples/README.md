@@ -24,12 +24,18 @@
 
 ```
 列 1-2    管理列      _TestCaseId、_Remarks
-列 3      业务列      Report Timestamp（必填；Excel 时间单元格按原样保存为文本，如 2026-11-09T20:34:00.970）
+列 3      业务列      Report Timestamp（必填；公式 =NOW()，Excel 时间格式）
 列 4-27   业务列      IRS 全部 24 个交易字段（schema 顺序；固定/浮动利率两列同名 "Rate"）
 列 28     未映射列    Extra Ref
 ```
 
 - 严格模式下定义区为第 1-27 列，与产品定义逐位一致；`Extra Ref` 区外，归入未映射列。
+- 两列使用公式，专门用于公式链路验证：
+  - `Report Timestamp`（C 列）为 `=NOW()`，单元格格式 `yyyy-mm-dd hh:mm:ss.000`；
+  - `Trade Date`（E 列）为 `=TODAY()`，单元格格式 `yyyy-mm-dd`。
+- 导入时保存**公式原文 + 缓存值**，`formula_json` 记录 `fields.reportTimestamp = "=NOW()"`、
+  `fields.tradeDate = "=TODAY()"`；导出时按批次基线重算，因此这两列输出的是导出时刻重新计算的值
+  （易失函数，两次导出结果可能不同，属预期行为）。
 
 ### IRS_Wide 列结构（70 列）
 
@@ -62,6 +68,7 @@
    - 向导会自动跳到第一个可用 sheet（`说明` 无交易块，接着是 `IRS.Standard`），可手动切到 `IRS_Wide` 查看 70 列预览；
    - `说明` sheet 找不到交易块，导入时计入 `PARTIAL`，用于演示问题定位；
    - `IRS.Standard` 用 `IRS` 产品严格模式预览：27 个字段全部映射、`Extra Ref` 未映射；
+   - `IRS.Standard` 的 `Report Timestamp` / `Trade Date` 为 `=NOW()` / `=TODAY()`，预览可见 `ƒ` 徽标，导出时重算；
    - `IRS` sheet 自动识别表头第 3 行、交易列从第 3 列开始，`Notional` 显示公式徽标；
 3. 上传 `ccsirs_wide.csv`：验证第 3 个产品与 100 行宽表，导入后批次页可分页浏览。
 4. 批次页：纵向浏览、编辑、克隆（如 200 行批次克隆 2 条 × 2 份）、导出 CSV。

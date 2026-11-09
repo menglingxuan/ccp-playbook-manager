@@ -78,6 +78,14 @@ public final class SampleWorkbookGenerator {
     /** First business column of the MW/IRS template; it opens the trade block. */
     public static final String REPORT_TIMESTAMP_HEADER = "Report Timestamp";
 
+    /** Zero based columns of the two formula cells in the standard sheet. */
+    private static final int REPORT_TIMESTAMP_COLUMN = 2;
+    private static final int TRADE_DATE_COLUMN = 4;
+
+    /** Volatile formulas the standard sheet carries, so formula recalculation can be verified. */
+    public static final String NOW_FORMULA = "NOW()";
+    public static final String TODAY_FORMULA = "TODAY()";
+
     /** IRS trade columns in schema order; "Rate" appears twice on purpose. */
     private static final String[] WIDE_TRADE_HEADERS = {
             "Trade ID", "Trade Date", "Effective Date", "Maturity Date", "Notional", "Notional Currency",
@@ -154,6 +162,10 @@ public final class SampleWorkbookGenerator {
     /**
      * Writes the standard IRS sheet: the two system managed columns, the required Report Timestamp,
      * the complete IRS trade block in schema order, then one unmapped column.
+     *
+     * <p>{@code Report Timestamp} and {@code Trade Date} are volatile formulas ({@code =NOW()} and
+     * {@code =TODAY()}), so the sheet doubles as the formula recalculation fixture: the import keeps
+     * the formula text and the cached value, and an export recalculates it.
      */
     private static void writeIrsStandardSheet(Workbook workbook, CellStyle dateStyle,
             CellStyle dateTimeStyle) {
@@ -168,30 +180,34 @@ public final class SampleWorkbookGenerator {
         }
         header.createCell(column).setCellValue("Extra Ref");
 
+        // null marks a formula column: its value is produced by evaluation, not by the fixture.
         String[][] rows = {
-                {"TC-IRS-0001", "standard row 1", "2026-11-09T20:34:00.970", "IRS-1001", "2026-01-05",
-                        "2026-01-07", "2031-01-05", "1500000", "USD", "0.0325", "0.0425", "ANNUAL", "SEMI",
-                        "ACT/360", "MODIFIED FOLLOWING", "TARGET", "HKEX OTC CLEAR", "CM-001", "ACC-10001",
-                        "CP-001", "BUY", "UPI-1001", "PARTY-A", "CLEARED", "2026-01-12", "PF-01", "N",
-                        "REF-A"},
-                {"TC-IRS-0002", "standard row 2", "2026-11-09T20:35:00.120", "IRS-1002", "2026-02-10",
-                        "2026-02-12", "2031-02-10", "2000000", "EUR", "0.0250", "0.0350", "ANNUAL",
-                        "QUARTERLY", "ACT/360", "MODIFIED FOLLOWING", "TARGET", "HKEX OTC CLEAR", "CM-002",
-                        "ACC-10002", "CP-002", "SELL", "UPI-1002", "PARTY-B", "CLEARED", "2026-02-17",
-                        "PF-02", "Y", "REF-B"},
-                {"TC-IRS-0003", "standard row 3", "2026-11-09T20:36:00.450", "IRS-1003", "2026-03-15",
-                        "2026-03-17", "2031-03-15", "750000", "GBP", "0.0180", "0.0280", "SEMI", "SEMI",
-                        "ACT/365", "MODIFIED FOLLOWING", "LONDON", "HKEX OTC CLEAR", "CM-003", "ACC-10003",
-                        "CP-003", "BUY", "UPI-1003", "PARTY-A", "CLEARED", "2026-03-20", "PF-03", "N",
-                        "REF-C"}};
+                {"TC-IRS-0001", "standard row 1", null, "IRS-1001", null, "2026-01-07", "2031-01-05",
+                        "1500000", "USD", "0.0325", "0.0425", "ANNUAL", "SEMI", "ACT/360",
+                        "MODIFIED FOLLOWING", "TARGET", "HKEX OTC CLEAR", "CM-001", "ACC-10001", "CP-001",
+                        "BUY", "UPI-1001", "PARTY-A", "CLEARED", "2026-01-12", "PF-01", "N", "REF-A"},
+                {"TC-IRS-0002", "standard row 2", null, "IRS-1002", null, "2026-02-12", "2031-02-10",
+                        "2000000", "EUR", "0.0250", "0.0350", "ANNUAL", "QUARTERLY", "ACT/360",
+                        "MODIFIED FOLLOWING", "TARGET", "HKEX OTC CLEAR", "CM-002", "ACC-10002", "CP-002",
+                        "SELL", "UPI-1002", "PARTY-B", "CLEARED", "2026-02-17", "PF-02", "Y", "REF-B"},
+                {"TC-IRS-0003", "standard row 3", null, "IRS-1003", null, "2026-03-17", "2031-03-15",
+                        "750000", "GBP", "0.0180", "0.0280", "SEMI", "SEMI", "ACT/365",
+                        "MODIFIED FOLLOWING", "LONDON", "HKEX OTC CLEAR", "CM-003", "ACC-10003", "CP-003",
+                        "BUY", "UPI-1003", "PARTY-A", "CLEARED", "2026-03-20", "PF-03", "N", "REF-C"}};
 
         for (int index = 0; index < rows.length; index++) {
             Row row = sheet.createRow(index + 1);
             String[] values = rows[index];
             for (int cell = 0; cell < values.length; cell++) {
-                if (cell == 2) {
-                    setDateTime(row.createCell(cell), LocalDateTime.parse(values[cell]), dateTimeStyle);
-                } else if (cell == 4 || cell == 5 || cell == 6 || cell == 24) {
+                if (cell == REPORT_TIMESTAMP_COLUMN) {
+                    Cell target = row.createCell(cell);
+                    target.setCellFormula(NOW_FORMULA);
+                    target.setCellStyle(dateTimeStyle);
+                } else if (cell == TRADE_DATE_COLUMN) {
+                    Cell target = row.createCell(cell);
+                    target.setCellFormula(TODAY_FORMULA);
+                    target.setCellStyle(dateStyle);
+                } else if (cell == 5 || cell == 6 || cell == 24) {
                     setDate(row.createCell(cell), LocalDate.parse(values[cell]), dateStyle);
                 } else if (cell == 7 || cell == 9 || cell == 10) {
                     row.createCell(cell).setCellValue(Double.parseDouble(values[cell]));

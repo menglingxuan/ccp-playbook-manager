@@ -109,8 +109,11 @@ class SampleDataTest extends AbstractIntegrationTest {
 
         JsonNode sample = sheetPreview.get("sampleRows").get(0);
         assertThat(sample.get("values").get("reportTimestamp").asString())
-                .isEqualTo("2026-11-09T20:34:00.970");
+                .matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?");
         assertThat(sample.get("values").get("tradeId").asString()).isEqualTo("IRS-1001");
+        assertThat(sample.get("values").get("tradeDate").asString()).matches("\\d{4}-\\d{2}-\\d{2}");
+        assertThat(sample.get("formulas").get("reportTimestamp").asString()).isEqualTo("=NOW()");
+        assertThat(sample.get("formulas").get("tradeDate").asString()).isEqualTo("=TODAY()");
         assertThat(sample.get("managed").get("_Remarks").asString()).isEqualTo("standard row 1");
         assertThat(sample.get("extras").get("Extra Ref").asString()).isEqualTo("REF-A");
     }

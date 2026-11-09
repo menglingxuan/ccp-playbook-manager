@@ -198,7 +198,8 @@ REST API 见 [docs/REST接口.md](./docs/REST接口.md)，CSV 细节见 [docs/CS
    进入 `extras`；要保留它们，就在产品定义里声明为管理字段。
    出厂种子中 `MW/IRS`（27 个字段）与 `MW/OIS`（22 个字段）都声明了 `_TestCaseId`、`_Remarks`，`MW/CCSIRS` 额外声明了
    `Scenario Group`、`Priority`（合计 70 个字段）。`MW/IRS` 的 `Report Timestamp` 是业务字段（交易块首列、恒必填），
-   Excel 中的时间单元格按原样保存为文本，例如 `2026-11-09T20:34:00.970`。
+   Excel 中的时间单元格按原样保存为文本，例如 `2026-11-09T22:53:51.79`；样例 `IRS.Standard` 中
+   `Report Timestamp` 与 `Trade Date` 使用 `=NOW()` / `=TODAY()`，用于验证公式保存与导出重算。
 7. **产出隔离**：外部产出用例 `origin=EXTERNAL_OUTPUT`，只在 `/outputs` 出现。
 8. **删除**：一律软删（`status=DELETED`），任务删除级联批次与用例。
 
