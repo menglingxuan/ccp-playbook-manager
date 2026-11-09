@@ -14,15 +14,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * Converts one raw sheet row into a {@link CaseRow}, capturing typed values, formulas, managed
  * columns, extras and the three record ids.
  */
 public final class RowConverter {
-
-    private static final Pattern RELATIVE_ROW_REFERENCE = Pattern.compile("(\\$?[A-Za-z]{1,3})\\$?\\d+");
 
     private RowConverter() {
     }
@@ -75,7 +72,9 @@ public final class RowConverter {
 
         String originalRecordId = RecordIdGenerator.originalId(context.fileName(), context.sheetName(),
                 sourceRow, context.hashLength());
-        String businessRecordId = RecordIdGenerator.businessId(schema, data, formulas, context.hashLength());
+        Map<String, String> hashFormulas = context.normalizeFormulaRefs()
+                ? Formulas.normalized(formulas) : formulas;
+        String businessRecordId = RecordIdGenerator.businessId(schema, data, hashFormulas, context.hashLength());
         if (businessRecordId.isEmpty() || !hasBusinessValue(schema, data, formulas)) {
             issues.add(ValidationIssue.warn("BUSINESS_KEY_EMPTY",
                     "Business fields are empty, falling back to the original record id").atRow(sourceRow));
@@ -113,7 +112,7 @@ public final class RowConverter {
                     .forField(key));
             return;
         }
-        formulas.put(key, context.normalizeFormulaRefs() ? normalizeFormula(formula) : formula);
+        formulas.put(key, formula);
     }
 
     private static Object parseCell(FieldDef field, RawCell cell, ColumnAssignment assignment,
@@ -166,9 +165,6 @@ public final class RowConverter {
 
     /** Masks row numbers inside cell references so the same relative formula matches across rows. */
     public static String normalizeFormula(String formula) {
-        if (formula == null) {
-            return null;
-        }
-        return RELATIVE_ROW_REFERENCE.matcher(formula).replaceAll("$1#");
+        return Formulas.normalize(formula);
     }
 }

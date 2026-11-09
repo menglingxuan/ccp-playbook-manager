@@ -39,6 +39,22 @@ public class DataLayout {
         return ensureExists(tenantRoot(tenantId).resolve("exports").resolve(date.format(DATE)));
     }
 
+    /** Root of the immutable per-batch artifacts (workbook baselines and the like). */
+    public Path batchesRoot(String tenantId) {
+        return ensureExists(tenantRoot(tenantId).resolve("batches"));
+    }
+
+    /** Batch folder, created on demand. */
+    public Path batchFolder(String tenantId, String batchId) {
+        return ensureExists(resolveSafe(batchesRoot(tenantId).resolve(batchId)));
+    }
+
+    /** Batch folder without creating it; {@code null} when it does not exist yet. */
+    public Path existingBatchFolder(String tenantId, String batchId) {
+        Path folder = resolveSafe(batchesRoot(tenantId).resolve(batchId));
+        return java.nio.file.Files.isDirectory(folder) ? folder : null;
+    }
+
     public Path jobsRoot(String tenantId) {
         return ensureExists(tenantRoot(tenantId).resolve("jobs"));
     }

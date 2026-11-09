@@ -11,6 +11,7 @@ import ac.core.persistence.ImportTaskRow;
 import ac.core.persistence.TestCaseRecord;
 import ac.core.persistence.TestCaseRepository;
 import ac.core.service.audit.AuditService;
+import ac.core.service.baseline.BaselineStore;
 import ac.core.service.cases.CaseJsonCodec;
 import ac.core.service.product.ProductCatalog;
 import ac.domain.analysis.ImportStopPolicy;
@@ -82,11 +83,13 @@ public class ImportService {
     private final JsonSupport json;
     private final TimeProvider time;
     private final AppProperties properties;
+    private final BaselineStore baselineStore;
 
     public ImportService(UploadStore uploadStore, PreviewService previewService, SheetCache sheetCache,
             ProductCatalog products, ImportTaskRepository taskRepository,
             ImportBatchRepository batchRepository, TestCaseRepository caseRepository, CaseJsonCodec codec,
-            AuditService audit, JsonSupport json, TimeProvider time, AppProperties properties) {
+            AuditService audit, JsonSupport json, TimeProvider time, AppProperties properties,
+            BaselineStore baselineStore) {
         this.uploadStore = uploadStore;
         this.previewService = previewService;
         this.sheetCache = sheetCache;
@@ -99,6 +102,7 @@ public class ImportService {
         this.json = json;
         this.time = time;
         this.properties = properties;
+        this.baselineStore = baselineStore;
     }
 
     @Transactional
@@ -163,6 +167,7 @@ public class ImportService {
                         layout.tradeEndColumn(), layoutJson(layout), mappingJson(layout), schema.schemaHash(),
                         "ACTIVE", rows.size(), invalid, null, "system", now, now,
                         null));
+                keepBaseline(tenantId, batchId, upload, issues);
 
                 List<TestCaseRecord> records = new ArrayList<>(rows.size());
                 for (CaseRow row : rows) {
@@ -218,6 +223,22 @@ public class ImportService {
             items.add(item);
         }
         return json.toJson(items);
+    }
+
+    /**
+     * Keeps an immutable copy of the imported workbook so export can recalculate its formulas even
+     * after the upload itself has been purged. A missing copy only degrades recalculation.
+     */
+    private void keepBaseline(String tenantId, String batchId, StoredUpload upload,
+            List<ValidationIssue> issues) {
+        if (!BaselineStore.isWorkbook(upload.sourceType())) {
+            return;
+        }
+        if (baselineStore.save(tenantId, batchId, upload).isEmpty()) {
+            issues.add(ValidationIssue.warn("BASELINE_MISSING",
+                    "The workbook baseline could not be stored; formula recalculation at export "
+                            + "is unavailable for this batch"));
+        }
     }
 
     /**

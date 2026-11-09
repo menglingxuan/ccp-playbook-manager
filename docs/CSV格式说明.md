@@ -47,7 +47,12 @@
 | `BOOLEAN` | `true` / `false` | `Y/N`、`YES/NO`、`T/F`、`1/0` |
 | `TEXT` | 原样（去除首尾空白） | 任意 |
 
-公式字段导出**缓存值**（`formulaAsValue=true`），不是公式文本。
+公式字段导出**值**（`formulaAsValue=true`），不是公式文本。默认在导出前用导入时保存的工作簿基线
+（`tenants/{tenant}/batches/{batchId}/source.xlsx`）重算一次：基线的原始行列作为底层，当前用例值按
+Excel 原生类型写回对应单元格，公式原文照写，求值结果回填到该字段。因此 CSV 得到的是重算后的值，
+而不是源文件在导入时携带的缓存值；用户在平台内改过输入字段，导出时公式结果也会随之更新。
+不支持求值的公式（POI 未实现的函数、外部链接、循环引用）保留用例存储值并给出
+`FORMULA_RECALC_WARNING` / `FORMULA_RECALC_INCOMPLETE` 提示，不阻断导出。
 
 ## 4. 导入侧约定
 

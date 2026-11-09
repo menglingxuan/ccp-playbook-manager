@@ -9,10 +9,12 @@ import ac.core.common.TimeProvider;
 import ac.core.persistence.ExportJobRepository;
 import ac.core.persistence.ExportJobRow;
 import ac.core.persistence.ImportBatchRepository;
+import ac.core.persistence.ImportBatchRow;
 import ac.core.persistence.TestCaseRecord;
 import ac.core.persistence.TestCaseRepository;
 import ac.core.service.DataLayout;
 import ac.core.service.audit.AuditService;
+import ac.core.service.baseline.BaselineStore;
 import ac.core.service.cases.CaseJsonCodec;
 import ac.core.service.cases.CaseService;
 import ac.core.service.product.ProductCatalog;
@@ -21,8 +23,10 @@ import ac.domain.casefile.ValidationIssue;
 import ac.domain.export.CsvFormatOptions;
 import ac.domain.export.CsvWriter;
 import ac.domain.export.ManagedColumnScope;
+import ac.domain.product.FieldCodec;
 import ac.domain.product.FieldDef;
 import ac.domain.product.ProductSchema;
+import ac.domain.table.WorkbookRecalculator;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -61,11 +65,12 @@ public class ExportService {
     private final ExportJobRepository exportRepository;
     private final SettingsService settings;
     private final AuditService audit;
+    private final BaselineStore baselines;
 
     public ExportService(CaseService caseService, TestCaseRepository caseRepository,
             ImportBatchRepository batchRepository, ProductCatalog products, CaseJsonCodec codec,
             JsonSupport json, TimeProvider time, DataLayout dataLayout, ExportJobRepository exportRepository,
-            SettingsService settings, AuditService audit) {
+            SettingsService settings, AuditService audit, BaselineStore baselines) {
         this.caseService = caseService;
         this.caseRepository = caseRepository;
         this.batchRepository = batchRepository;
@@ -77,13 +82,20 @@ public class ExportService {
         this.exportRepository = exportRepository;
         this.settings = settings;
         this.audit = audit;
+        this.baselines = baselines;
     }
 
     public ExportPrecheck precheck(String tenantId, ExportRequest request) {
+        List<ValidationIssue> issues = new ArrayList<>();
+        return precheck(tenantId, request, issues);
+    }
+
+    /** Precheck that also reports the recalculation warnings it produced. */
+    private ExportPrecheck precheck(String tenantId, ExportRequest request, List<ValidationIssue> issues) {
         Selection selection = select(tenantId, request);
         CsvFormatOptions options = options(tenantId, request);
         List<Column> columns = columns(tenantId, request, selection);
-        List<ValidationIssue> issues = new ArrayList<>();
+        Recalculated recalculated = recalculate(tenantId, request, selection, issues);
 
         Set<String> keys = new LinkedHashSet<>();
         for (TestCaseRecord record : selection.records()) {
@@ -113,11 +125,12 @@ public class ExportService {
         }
 
         List<String> headers = columns.stream().map(Column::header).toList();
-        List<String> sample = selection.records().isEmpty()
+        TestCaseRecord first = selection.records().isEmpty() ? null : selection.records().get(0);
+        List<String> sample = first == null
                 ? List.of()
                 : columns.stream().map(column -> cellValue(selection.schema(),
-                        json.toMap(selection.records().get(0).dataJson()),
-                        toStringMap(selection.records().get(0)), column)).toList();
+                        json.toMap(first.dataJson()), toStringMap(first), column,
+                        recalculated.values().getOrDefault(first.id(), Map.of()))).toList();
         boolean valid = issues.stream().noneMatch(issue -> issue.level() == ac.domain.casefile.IssueLevel.ERROR);
         return new ExportPrecheck(valid && !selection.records().isEmpty(), selection.records().size(),
                 headers, sample, issues);
@@ -129,14 +142,17 @@ public class ExportService {
         if (selection.records().isEmpty()) {
             throw ApiException.invalid("Nothing to export");
         }
-        ExportPrecheck precheck = precheck(tenantId, request);
+        // Precheck only validates stored values; recalculation runs once below, on the real content.
+        ExportPrecheck precheck = precheck(tenantId, new ExportRequest(request.batchId(),
+                request.caseIds(), request.options(), Boolean.FALSE));
         if (!precheck.valid()) {
             throw new ApiException(ac.core.common.ErrorCode.INVALID_REQUEST,
                     "Export precheck failed", Map.of("issues", precheck.issues()));
         }
 
         CsvFormatOptions options = options(tenantId, request);
-        CsvContent content = content(tenantId, request);
+        List<ValidationIssue> issues = new ArrayList<>();
+        CsvContent content = content(tenantId, request, issues);
         List<String> headers = content.headers();
         List<List<String>> rows = content.rows();
 
@@ -181,7 +197,8 @@ public class ExportService {
         audit.record(tenantId, AuditService.ENTITY_EXPORT, exportId, "EXPORT",
                 Map.of("rows", rows.size(), "file", fileName));
 
-        return new ExportResult(exportId, fileName, rows.size(), size, TimeProvider.display(job.createdAt()));
+        return new ExportResult(exportId, fileName, rows.size(), size, TimeProvider.display(job.createdAt()),
+                issues.stream().map(ValidationIssue::message).toList());
     }
 
     public PageResult<ExportJobRow> history(String tenantId, PageQuery page) {
@@ -223,16 +240,27 @@ public class ExportService {
     }
 
     public CsvContent content(String tenantId, ExportRequest request) {
+        return content(tenantId, request, new ArrayList<>());
+    }
+
+    /**
+     * Rendered CSV content, optionally with freshly recalculated formula values.
+     *
+     * @param issues collects recalculation warnings so callers can surface them
+     */
+    public CsvContent content(String tenantId, ExportRequest request, List<ValidationIssue> issues) {
         Selection selection = select(tenantId, request);
         List<Column> columns = columns(tenantId, request, selection);
         List<String> headers = columns.stream().map(Column::header).toList();
+        Recalculated recalculated = recalculate(tenantId, request, selection, issues);
         List<List<String>> rows = new ArrayList<>(selection.records().size());
         for (TestCaseRecord record : selection.records()) {
             Map<String, Object> data = json.toMap(record.dataJson());
             Map<String, String> managed = toStringMap(record);
+            Map<String, String> computed = recalculated.values().getOrDefault(record.id(), Map.of());
             List<String> row = new ArrayList<>(columns.size());
             for (Column column : columns) {
-                row.add(cellValue(selection.schema(), data, managed, column));
+                row.add(cellValue(selection.schema(), data, managed, column, computed));
             }
             rows.add(row);
         }
@@ -345,12 +373,131 @@ public class ExportService {
     }
 
     private String cellValue(ProductSchema schema, Map<String, Object> data, Map<String, String> managed,
-            Column column) {
+            Column column, Map<String, String> computed) {
         if (column.managedKey() != null) {
             return managed.getOrDefault(column.managedKey(), "");
         }
+        if (computed.containsKey(column.fieldKey())) {
+            return computed.get(column.fieldKey());
+        }
         Object value = data.get(column.fieldKey());
         return value == null ? "" : codec.displayValue(schema, column.fieldKey(), value);
+    }
+
+    // ------------------------------------------------------------ recalculation
+
+    /**
+     * Recalculates the workbook formulas of the batch behind the selection.
+     *
+     * <p>The baseline workbook of the batch is used as the base layer, so rows and helper columns
+     * that were not imported still resolve, while the current case values are written back on top of
+     * their cells. Results replace the stored values only for the cells that actually computed.
+     */
+    private Recalculated recalculate(String tenantId, ExportRequest request, Selection selection,
+            List<ValidationIssue> issues) {
+        if (!request.recalculateEnabled() || selection.records().isEmpty()) {
+            return Recalculated.NONE;
+        }
+        if (selection.records().stream().noneMatch(record -> record.formulaCount() > 0)) {
+            return Recalculated.NONE;
+        }
+        Set<String> batchIds = new LinkedHashSet<>();
+        selection.records().forEach(record -> batchIds.add(record.batchId()));
+        if (batchIds.size() != 1) {
+            issues.add(ValidationIssue.warn("FORMULA_RECALC_SKIPPED",
+                    "Selected cases come from " + batchIds.size() + " batches, formulas were not recalculated"));
+            return Recalculated.NONE;
+        }
+        String batchId = batchIds.iterator().next();
+        ImportBatchRow batch = batchRepository.find(tenantId, batchId).orElse(null);
+        if (batch == null || !BaselineStore.isWorkbook(batch.sourceType())) {
+            return Recalculated.NONE;
+        }
+        Path baseline = baselines.find(tenantId, batchId, batch.sourceSha256()).orElse(null);
+        if (baseline == null) {
+            issues.add(ValidationIssue.warn("FORMULA_RECALC_SKIPPED",
+                    "The workbook baseline of this batch is missing, formulas were not recalculated"));
+            return Recalculated.NONE;
+        }
+
+        List<WorkbookRecalculator.CaseTarget> targets = caseTargets(selection, batch);
+        WorkbookRecalculator.Result result = WorkbookRecalculator.recalculate(baseline,
+                batch.sheetName(), targets);
+        result.warnings().stream().limit(20).forEach(message -> issues.add(
+                ValidationIssue.warn("FORMULA_RECALC_WARNING", message)));
+        if (result.failed() > 0) {
+            issues.add(ValidationIssue.warn("FORMULA_RECALC_INCOMPLETE",
+                    result.failed() + " formula cell(s) could not be recalculated and keep their stored value"));
+        }
+        if (result.evaluated() > 0) {
+            log.info("Recalculated {} formula cell(s) for batch {}", result.evaluated(), batchId);
+        }
+        return new Recalculated(result.values());
+    }
+
+    /** Builds the write-back plan from the batch column mapping and the current case values. */
+    private List<WorkbookRecalculator.CaseTarget> caseTargets(Selection selection, ImportBatchRow batch) {
+        List<MappingEntry> mapping = mappingEntries(batch);
+        List<WorkbookRecalculator.CaseTarget> targets = new ArrayList<>(selection.records().size());
+        for (TestCaseRecord record : selection.records()) {
+            if (record.sourceRow() == null) {
+                continue;
+            }
+            Map<String, Object> data = json.toMap(record.dataJson());
+            Map<String, String> managed = toStringMap(record);
+            Map<String, String> formulas = codec.tradeFormulas(record.formulaJson());
+            List<WorkbookRecalculator.CellTarget> cells = new ArrayList<>(mapping.size());
+            for (MappingEntry entry : mapping) {
+                String formula = entry.fieldKey == null ? null : formulas.get(entry.fieldKey);
+                if (entry.fieldKey != null) {
+                    FieldDef field = selection.schema().byKey().get(entry.fieldKey);
+                    if (field == null) {
+                        continue;
+                    }
+                    cells.add(new WorkbookRecalculator.CellTarget(entry.column, entry.fieldKey, field,
+                            FieldCodec.canonical(field, data.get(entry.fieldKey)), formula));
+                } else if (entry.managedKey != null) {
+                    cells.add(new WorkbookRecalculator.CellTarget(entry.column, entry.managedKey, null,
+                            managed.get(entry.managedKey), null));
+                }
+            }
+            targets.add(new WorkbookRecalculator.CaseTarget(record.id(), record.sourceRow(), cells));
+        }
+        return targets;
+    }
+
+    private List<MappingEntry> mappingEntries(ImportBatchRow batch) {
+        List<MappingEntry> entries = new ArrayList<>();
+        if (batch.columnMappingJson() == null) {
+            return entries;
+        }
+        for (Object item : json.toList(batch.columnMappingJson())) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            String kind = String.valueOf(map.get("kind"));
+            Object column = map.get("column");
+            if (column == null || !(column instanceof Number number)) {
+                continue;
+            }
+            String fieldKey = map.get("fieldKey") == null ? null : String.valueOf(map.get("fieldKey"));
+            String managedKey = map.get("managedKey") == null ? null : String.valueOf(map.get("managedKey"));
+            if ("TRADE".equals(kind) && fieldKey != null) {
+                entries.add(new MappingEntry(number.intValue(), fieldKey, null));
+            } else if ("MANAGED".equals(kind) && managedKey != null) {
+                entries.add(new MappingEntry(number.intValue(), null, managedKey));
+            }
+        }
+        return entries;
+    }
+
+    /** Recalculated values keyed by case id, then by field key. */
+    private record Recalculated(Map<String, Map<String, String>> values) {
+
+        static final Recalculated NONE = new Recalculated(Map.of());
+    }
+
+    private record MappingEntry(int column, String fieldKey, String managedKey) {
     }
 
     private record Column(String header, String fieldKey, String managedKey) {

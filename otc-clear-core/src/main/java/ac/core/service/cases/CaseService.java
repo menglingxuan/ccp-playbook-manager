@@ -12,6 +12,7 @@ import ac.core.persistence.TestCaseRepository;
 import ac.core.service.audit.AuditService;
 import ac.core.service.product.ProductCatalog;
 import ac.domain.casefile.CaseValidator;
+import ac.domain.casefile.Formulas;
 import ac.domain.casefile.RecordIdGenerator;
 import ac.domain.casefile.ValidationIssue;
 import ac.domain.product.FieldCodec;
@@ -164,7 +165,7 @@ public class CaseService {
         Map<String, String> managed = toStringMap(json.toMapOrEmpty(record.managedJson()));
         managed.putAll(request.managed());
 
-        String businessRecordId = RecordIdGenerator.businessId(schema, merged, formulas,
+        String businessRecordId = RecordIdGenerator.businessId(schema, merged, hashFormulas(formulas),
                 properties.getIds().getHashLength());
         String keyValue = null;
         if (schema.uniqueField() != null) {
@@ -226,6 +227,11 @@ public class CaseService {
         return new CaseSummary(record.id(), record.batchId(), record.productCode(), record.origin(),
                 record.rowNo(), record.testCaseId(), record.originalRecordId(), record.businessRecordId(),
                 record.keyValue(), record.formulaCount(), record.version(), preview);
+    }
+
+    /** Normalizes formula references only when the configured identity policy asks for it. */
+    private Map<String, String> hashFormulas(Map<String, String> formulas) {
+        return properties.getIds().isNormalizeFormulaRefs() ? Formulas.normalized(formulas) : formulas;
     }
 
     private String buildSearchText(ProductSchema schema, String testCaseId, String keyValue,

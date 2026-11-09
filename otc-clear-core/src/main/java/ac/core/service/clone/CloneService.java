@@ -18,6 +18,7 @@ import ac.domain.clone.NamingTemplate;
 import ac.domain.product.FieldCodec;
 import ac.domain.product.FieldDef;
 import ac.domain.product.ProductSchema;
+import ac.domain.casefile.Formulas;
 import ac.domain.casefile.RecordIdGenerator;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -166,7 +167,9 @@ public class CloneService {
                 String originalRecordId = RecordIdGenerator.cloneOriginalId(source.originalRecordId(), sequence,
                         properties.getIds().getHashLength());
                 Map<String, String> formulas = codec.tradeFormulas(source.formulaJson());
-                String businessRecordId = RecordIdGenerator.businessId(schema, data, formulas,
+                Map<String, String> hashFormulas = properties.getIds().isNormalizeFormulaRefs()
+                        ? Formulas.normalized(formulas) : formulas;
+                String businessRecordId = RecordIdGenerator.businessId(schema, data, hashFormulas,
                         properties.getIds().getHashLength());
                 rows.add(new PlannedRow(source, data, testCaseId, originalRecordId, businessRecordId, newKey));
                 plannedKeys.add(newKey);

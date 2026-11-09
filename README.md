@@ -77,6 +77,7 @@ Windows 下可直接双击 `run-single.cmd` / `run-tenant.cmd`（见仓库根目
 data/tenants/{tenant}/
 ├── db/otc.mv.db                 # H2 数据库
 ├── uploads/{yyyyMMdd}/          # 上传原文件 + .meta 指纹文件（TTL 清理）
+├── batches/{batchId}/           # 批次级不可变基线 source.xlsx（供导出重算公式，不随 TTL 清理）
 ├── exports/{yyyyMMdd}/          # 导出的 CSV
 └── jobs/{yyyy}/{MM}/{jobId}/    # 外部任务文件夹
     ├── input/{jobId}.csv        # 派发输入
@@ -92,7 +93,7 @@ data/tenants/{tenant}/
 | 任务面板 | `/` | 任务筛选/排序/搜索/删除，状态统计卡片 |
 | 导入向导 | `/import` | 上传 → 参数化预览（400ms 防抖）→ 提交；未选择产品时只做原始数据预览（不套用设置项、不可提交），选择产品后按定义校验；表头行、定义起始列、数据起始/结束行可调；预览表按交易字段 / 管理列 / 未映射列分色并懒加载分页（默认 20 行）；「导入选项」控制管理列与未映射列是否落库，「空行前停止」「错误行前停止」控制扫描终止条件；状态标签可点击折叠问题区；结果面板与预览面板同宽，成功/失败分别展示，且不重复预览阶段已展示的列映射提示 |
 | 任务详情 | `/tasks/{id}` | 批次列表、统计、问题明细 |
-| 批次详情 | `/batches/{id}` | 用例表格、纵向浏览、编辑、克隆、导出、派发 |
+| 批次详情 | `/batches/{id}` | 用例表格、纵向浏览、编辑、克隆、导出（默认导出前重算工作簿公式）、派发 |
 | 产出浏览 | `/outputs`、`/outputs/{id}` | 外部产出独立浏览（不进主用例列表） |
 | 外部任务 | `/external-jobs`、`/external-jobs/{id}` | 派发、状态刷新、停止、扫描产出 |
 | 产品定义 | `/products` | 平台 → 基产品 → 产品，字段继承与裁剪 |
@@ -187,7 +188,10 @@ REST API 见 [docs/REST接口.md](./docs/REST接口.md)，CSV 细节见 [docs/CS
    - Test Case Id：文件中 `_TestCaseId`，缺失则生成 `TC-{businessId[0..12]}`；
    - Original Record Id：`sha256(文件名|sheet|行号)[0..31]`；
    - Business Record Id：`sha256(业务字段)`，公式字段用**公式文本**参与哈希。
-5. **公式**：缓存值入库，公式文本与字段关联存 `formula_json`，UI 显示 `ƒ` 徽标。
+5. **公式**：导入时把工作簿复制一份不可变基线（`batches/{batchId}/source.xlsx`，读取前校验 `sha256`），
+   公式文本按原文存 `formula_json`（只在计算 Business Record Id 时可选地掩码行号），UI 显示 `ƒ` 徽标。
+   导出前默认用基线 + 当前用例值重算公式，CSV 输出重算后的值而不是源文件的缓存值；不支持求值的公式
+   保留用例值并告警。
 6. **管理列**：只有产品定义中声明为 `MANAGED` 的字段才算管理列，写入 `managed_json`
    （`_TestCaseId` 落到独立列）。没有声明的列（包括文件里的 `_TestCaseId` / `_Remarks`）都是**未映射列**，
    进入 `extras`；要保留它们，就在产品定义里声明为管理字段。

@@ -5,8 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import ac.domain.TestTables;
 import ac.domain.layout.ColumnLayoutResolver;
 import ac.domain.layout.SheetLayout;
-import ac.domain.TestSchemas;
-import ac.domain.product.ProductSchema;
+import ac.domain.TestSchemas;import ac.domain.product.ProductSchema;
 import ac.domain.table.RawRow;
 import ac.domain.table.RawTable;
 import java.math.BigDecimal;
@@ -157,7 +156,7 @@ class RowConverterTest {
     }
 
     @Test
-    void normalizesFormulaReferencesWhenRequested() {
+    void keepsRawFormulaTextAndNormalizesOnlyForHashing() {
         RawTable table = TestTables.withFormulas("IRS", List.of(HEADER,
                         dataRow("", "", "IRS-0013", "2026-01-02", "", "2031-01-02", "100", "USD", "0.03",
                                 "0.04", "BUY", "")),
@@ -167,6 +166,11 @@ class RowConverterTest {
 
         CaseRow row = RowConverter.convert(context, table, 2, 1);
 
-        assertThat(row.formulas()).containsEntry("notional", "=D#*E#");
+        // stored verbatim so the workbook can be rebuilt for recalculation
+        assertThat(row.formulas()).containsEntry("notional", "=D2*E2");
+        // hashing still uses the masked text, so the id stays stable across rows
+        String normalizedId = RecordIdGenerator.businessId(SCHEMA, row.data(),
+                Map.of("notional", "=D#*E#"), 32);
+        assertThat(row.businessRecordId()).isEqualTo(normalizedId);
     }
 }

@@ -158,6 +158,10 @@
 （`UNMAPPED_TRADE_COLUMN`、`DUPLICATE_HEADER_MAPPING`、非严格模式的 `TRADE_BLOCK_NOT_CONTIGUOUS`）不再重复。
 `DUPLICATE_IMPORT` 只针对「同一个 upload 的同一个 sheet 被提交两次」；重新上传同一份文件属于新批次，不提示。
 `KEY_DUPLICATE` 只在**同一 sheet 内**业务键重复时提示，不再与历史批次比较。
+
+导入会把工作簿（`xlsx` / `xls`）复制一份不可变基线到
+`data-root/tenants/{tenant}/batches/{batchId}/source.{ext}`，用于导出时重算公式；CSV 不产生基线。
+基线只写一次、读取时校验 `sha256` 与批次记录一致，复制失败时导入结果给 `BASELINE_MISSING` 警告但不阻断导入。
 | GET | `/api/tasks` | 分页：`status`、`kind`、`product`、`q`、`sort=created|rows|invalid|duration`、`page`、`size` |
 | GET | `/api/tasks/summary` | 各状态任务数 |
 | GET | `/api/tasks/{id}` | 任务 + 批次 + 问题明细 |
@@ -213,9 +217,15 @@
     "bom": false,
     "managedColumns": "KNOWN",
     "formulaAsValue": true
-  }
+  },
+  "recalculateFormulas": true
 }
 ```
+
+`recalculateFormulas` 缺省为 `true`：导出前用批次的不可变基线工作簿重算公式，公式字段输出重算后的值
+（当前用例值先按 Excel 原生类型写回对应单元格，未导入的行与辅助列沿用基线原值）。求值失败的单元格保留
+用例存储值，并在 `ExportResult.warnings` 中给出 `FORMULA_RECALC_WARNING` / `FORMULA_RECALC_INCOMPLETE` /
+`FORMULA_RECALC_SKIPPED` 说明；预检接口返回的 `sampleRow` 同样是重算后的值。
 
 ## 外部任务与产出
 

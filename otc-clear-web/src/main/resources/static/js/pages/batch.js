@@ -236,6 +236,7 @@ function openExportPanel() {
       <div class="field" style="display:flex;align-items:center;gap:14px;padding-top:18px">
         <label class="muted" style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" id="expQuote"> 全量加引号</label>
         <label class="muted" style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" id="expBom"> UTF-8 BOM</label>
+        <label class="muted" style="display:flex;gap:6px;align-items:center;font-size:12px" title="用导入时保存的工作簿基线重算公式，导出重算后的值"><input type="checkbox" id="expRecalc" checked> 导出前重算公式</label>
       </div>
     </div>
     <div class="muted" style="font-size:12px;margin-bottom:6px">范围：${ids.length ? `选中 ${ids.length} 条用例` : '整个批次'}</div>
@@ -243,7 +244,11 @@ function openExportPanel() {
   `<button class="tool-btn" id="expPrecheckBtn">预检</button>
    <button class="tool-btn primary" id="expRunBtn" disabled>导出并下载</button>`);
 
-  const request = () => ({ ...scope, options: readOptions(modal.root) });
+  const request = () => ({
+    ...scope,
+    options: readOptions(modal.root),
+    recalculateFormulas: modal.root.querySelector('#expRecalc').checked,
+  });
 
   modal.root.querySelector('#expPrecheckBtn').addEventListener('click', async () => {
     try {
@@ -266,7 +271,12 @@ function openExportPanel() {
   modal.root.querySelector('#expRunBtn').addEventListener('click', async () => {
     try {
       const result = await post('/api/exports', request());
-      ui.toast(`已导出 ${result.rowCount} 行`, 'ok');
+      const warnings = result.warnings || [];
+      if (warnings.length) {
+        ui.toast(`已导出 ${result.rowCount} 行，${warnings.length} 条重算提示`, 'warn');
+      } else {
+        ui.toast(`已导出 ${result.rowCount} 行`, 'ok');
+      }
       window.location.href = `/api/exports/${encodeURIComponent(result.exportId)}/download`;
       modal.close();
     } catch (error) {
