@@ -12,10 +12,10 @@
       <div class="page-sub" id="batchSubtitle"></div>
     </div>
     <div class="row-actions">
+      <button class="tool-btn" id="backToListBtn">返回批次列表</button>
       <button class="tool-btn" id="backBtn">返回任务</button>
       <button class="tool-btn" id="cloneBtn">克隆</button>
       <button class="tool-btn" id="exportBtn">导出 CSV</button>
-      <button class="tool-btn" id="dispatchBtn">用批量导入工具导入</button>
       <button class="tool-btn danger" id="deleteBatchBtn">删除批次</button>
     </div>
   </div>
@@ -43,7 +43,7 @@
       <table id="caseTable">
         <thead>
         <tr>
-          <th class="checkbox-cell"><input type="checkbox" id="selectAll"></th>
+          <th class="checkbox-cell" data-no-resize="true"><input type="checkbox" id="selectAll"></th>
           <th class="num">行号</th>
           <th>Test Case Id</th>
           <th>Trade ID</th>
@@ -51,7 +51,7 @@
           <th>Business Record</th>
           <th>预览字段</th>
           <th class="num">公式</th>
-          <th>操作</th>
+          <th data-no-resize="true">操作</th>
         </tr>
         </thead>
         <tbody id="caseRows"></tbody>

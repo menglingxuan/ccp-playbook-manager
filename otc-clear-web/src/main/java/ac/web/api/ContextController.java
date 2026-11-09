@@ -48,7 +48,6 @@ public class ContextController {
         exportDefaults.put("formulaAsValue", options.formulaAsValue());
 
         return new ContextView(properties.getMode().name(), tenantId, properties.getDataRoot(), version,
-                properties.getExternal().isEnabled(),
                 new ContextView.LimitsView(properties.getLimits().getMaxFileSizeBytes(),
                         properties.getLimits().getMaxCloneCount(),
                         properties.getLimits().getMaxBulkDelete(),

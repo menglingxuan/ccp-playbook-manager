@@ -226,7 +226,7 @@ public class ExportService {
     }
 
     /**
-     * Rendered CSV content without touching the file system, reused by external job dispatch.
+     * Rendered CSV content without touching the file system.
      *
      * @param headers column headers in output order
      * @param rows    formatted values
@@ -237,10 +237,6 @@ public class ExportService {
             headers = List.copyOf(headers);
             rows = List.copyOf(rows);
         }
-    }
-
-    public CsvContent content(String tenantId, ExportRequest request) {
-        return content(tenantId, request, new ArrayList<>());
     }
 
     /**

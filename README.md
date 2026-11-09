@@ -1,13 +1,11 @@
 # OTC Clear 测试数据管理平台
 
-HKEX OTC Clear 清算测试数据（Markitwire ATRS）的用例导入、管理、克隆与 CSV 导出工具，
-并负责向外部「批量导入工具」派发任务、回收产出文件。
+HKEX OTC Clear 清算测试数据（Markitwire ATRS）的用例导入、管理、克隆与 CSV 导出工具。
 
 实现依据：OTC Clear 测试数据导入管理平台开发计划 v2.1（随任务提供的 `docs/开发计划.md`，位于独立的需求文档目录，不在本仓库内）。本仓库是该计划的落地实现。
 
 相关文档：[REST 接口](./docs/REST接口.md)、[CSV 格式](./docs/CSV格式说明.md)、
-[外部批量导入接口](./docs/外部批量导入接口.md)、[ADR-0001](./docs/ADR-0001-外部任务与文件布局.md)、
-[验收清单](./docs/验收清单.md)。
+[ADR-0001](./docs/ADR-0001-外部任务与文件布局.md)、[验收清单](./docs/验收清单.md)。
 
 ## 技术栈
 
@@ -78,10 +76,7 @@ data/tenants/{tenant}/
 ├── db/otc.mv.db                 # H2 数据库
 ├── uploads/{yyyyMMdd}/          # 上传原文件 + .meta 指纹文件（TTL 清理）
 ├── batches/{batchId}/           # 批次级不可变基线 source.xlsx（供导出重算公式，不随 TTL 清理）
-├── exports/{yyyyMMdd}/          # 导出的 CSV
-└── jobs/{yyyy}/{MM}/{jobId}/    # 外部任务文件夹
-    ├── input/{jobId}.csv        # 派发输入
-    └── input/manifest.json      # 派发清单
+└── exports/{yyyyMMdd}/          # 导出的 CSV
 ```
 
 备份：停服后复制 `data/tenants/{tenant}` 即可；恢复时放回原位置再启动。
@@ -90,18 +85,17 @@ data/tenants/{tenant}/
 
 | 页面 | 路径 | 说明 |
 | --- | --- | --- |
-| 任务面板 | `/` | 任务筛选/排序/搜索/删除，状态统计卡片 |
-| 导入向导 | `/import` | 上传 → 参数化预览（400ms 防抖）→ 提交；未选择产品时只做原始数据预览（不套用设置项、不可提交），选择产品后按定义校验；表头行、定义起始列、数据起始/结束行可调；预览表按交易字段 / 管理列 / 未映射列分色并懒加载分页（默认 20 行）；「导入选项」控制管理列与未映射列是否落库，「空行前停止」「错误行前停止」控制扫描终止条件；状态标签可点击折叠问题区；结果面板与预览面板同宽，成功/失败分别展示，且不重复预览阶段已展示的列映射提示 |
+| 任务面板 | `/` | 任务搜索（任务 ID / 任务名称 / 文件名 / 基产品）、基产品（按平台分组）与创建日期区间筛选、删除，状态统计卡片；任务名称默认 `Untitled` 且可点击重命名（唯一、≤256 字符）；任务名称 / 批次数 / 创建时间可排序（升序 → 降序 → 原始顺序）；源文件失效时文件名加删除线；表格数字列居中、列宽可拖动 |
+| 导入向导 | `/import` | 上传 → 参数化预览（400ms 防抖）→ 提交；未选择产品时只做原始数据预览（不套用设置项、不可提交），选择产品后按定义校验；表头行、定义起始列、数据起始/结束行可调；预览表按交易字段 / 管理列 / 未映射列分色并懒加载分页（默认 20 行），公式单元格带 `ƒ` 标记；「导入选项」控制管理列与未映射列是否落库，「空行前停止」「错误行前停止」控制扫描终止条件；状态标签可点击折叠问题区；结果面板与预览面板同宽，成功/失败分别展示，且不重复预览阶段已展示的列映射提示 |
 | 任务详情 | `/tasks/{id}` | 批次列表、统计、问题明细 |
-| 批次详情 | `/batches/{id}` | 用例表格、纵向浏览、编辑、克隆、导出（默认导出前重算工作簿公式）、派发 |
-| 产出浏览 | `/outputs`、`/outputs/{id}` | 外部产出独立浏览（不进主用例列表） |
-| 外部任务 | `/external-jobs`、`/external-jobs/{id}` | 派发、状态刷新、停止、扫描产出 |
+| 批次列表 | `/batches` | 全部批次（导入 + 克隆），按产品/来源/关键字筛选，进入详情 |
+| 批次详情 | `/batches/{id}` | 用例表格、纵向浏览、编辑、克隆、导出（默认导出前重算工作簿公式） |
+| 产出浏览 | `/outputs`、`/outputs/{id}` | 产出文件独立浏览（不进主用例列表） |
 | 产品定义 | `/products` | 平台 → 基产品 → 产品，字段继承与裁剪 |
 | 字段元信息 | `/meta` | 值类型 / 角色类型 / 标签等枚举字典 |
 | 关于 | `/about` | 运行模式、租户、数据目录、审计日志 |
 
-REST API 见 [docs/REST接口.md](./docs/REST接口.md)，CSV 细节见 [docs/CSV格式说明.md](./docs/CSV格式说明.md)，
-外部工具契约见 [docs/外部批量导入接口.md](./docs/外部批量导入接口.md)。
+REST API 见 [docs/REST接口.md](./docs/REST接口.md)，CSV 细节见 [docs/CSV格式说明.md](./docs/CSV格式说明.md)。
 
 ## 多语言
 
@@ -200,7 +194,7 @@ REST API 见 [docs/REST接口.md](./docs/REST接口.md)，CSV 细节见 [docs/CS
    `Scenario Group`、`Priority`（合计 70 个字段）。`MW/IRS` 的 `Report Timestamp` 是业务字段（交易块首列、恒必填），
    Excel 中的时间单元格按原样保存为文本，例如 `2026-11-09T22:53:51.79`；样例 `IRS.Standard` 中
    `Report Timestamp` 与 `Trade Date` 使用 `=NOW()` / `=TODAY()`，用于验证公式保存与导出重算。
-7. **产出隔离**：外部产出用例 `origin=EXTERNAL_OUTPUT`，只在 `/outputs` 出现。
+7. **产出隔离**：产出用例 `origin=EXTERNAL_OUTPUT`，只在 `/outputs` 出现（外部工具派发链路已按需求移除，该页保留用于浏览历史产出）。
 8. **删除**：一律软删（`status=DELETED`），任务删除级联批次与用例。
 
 ## 构建与测试
@@ -217,7 +211,7 @@ gradle :otc-clear-web:bootJar           # 产出 otc-clear-testdata.jar
 | 层 | 位置 | 内容 |
 | --- | --- | --- |
 | 单元 | `otc-clear-domain/src/test` | 序列对齐（重名/缺列/乱序）、布局识别、管理列归类、三套 ID、公式捕获、CSV 写出、命名模板、表头检测、预览 |
-| 集成 | `otc-clear-web/src/test` | 真实 HTTP：上传→预览→导入→任务→批次→纵向→克隆→导出、Excel 公式、并发乐观锁、租户隔离、外部任务派发/回调/扫描、页面渲染 |
+| 集成 | `otc-clear-web/src/test` | 真实 HTTP：上传→预览→导入→任务→批次→纵向→克隆→导出、Excel 公式、并发乐观锁、租户隔离、页面渲染 |
 
 ## 与开发计划的偏差（已确认）
 
@@ -230,10 +224,11 @@ gradle :otc-clear-web:bootJar           # 产出 otc-clear-testdata.jar
 | Jackson 浮点反序列化为 `BigDecimal` | 保证 `1,500,000.00` 这类金额按原精度导出（`spring.jackson.deserialization.use-big-decimal-for-floats`） |
 | 前端为服务端页面壳 + 客户端渲染 | 与参考项目一致的纯 ES Module 方式；无 npm 构建 |
 | CSV 读写用 Commons CSV 1.14.1（计划 §6）而非 `jackson-data-format-csv` | 计划明确要求 Commons CSV，且需要按位置输出重名列、自定义引号策略（自研 `CsvWriter`） |
+| 外部「批量导入工具」派发链路已移除 | 按需求删除 `external-jobs` 页面、外部任务 API 与回调/扫描服务，待后续重新设计；`/outputs` 保留用于浏览历史产出 |
 
 更多决策见 [docs/ADR-0001-外部任务与文件布局.md](./docs/ADR-0001-外部任务与文件布局.md)。
 
 ## 待业务确认
 
-沿用计划附录 D：外部工具正式接口（Q1）、各产品完整字段清单（Q2）、公式规范化策略（Q3）、
+沿用计划附录 D：各产品完整字段清单（Q2）、公式规范化策略（Q3）、
 导出是否保留管理列（Q4）、产出 CSV 表头是否与输入一致（Q5）。

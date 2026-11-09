@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -114,9 +115,7 @@ public class ImportService {
         LocalDateTime now = time.nowUtc();
         String taskId = Ids.newId();
 
-        taskRepository.insert(new ImportTaskRow(taskId, tenantId, TASK_KIND, "PENDING", upload.fileName(),
-                upload.sha256(), request.sheets().size(), 0, 0, 0, paramsJson(request), null, null, "system", now,
-                null, null));
+        insertTask(tenantId, taskId, upload, request, now);
         taskRepository.markRunning(tenantId, taskId, now);
 
         List<ValidationIssue> issues = new ArrayList<>();
@@ -378,6 +377,27 @@ public class ImportService {
             items.add(item);
         });
         return json.toJson(items);
+    }
+
+    /**
+     * Inserts the task row with the first free default name; a concurrent import that grabbed the
+     * same name between the lookup and the insert triggers a retry instead of a failed import.
+     */
+    private void insertTask(String tenantId, String taskId, StoredUpload upload, ImportCommitRequest request,
+            LocalDateTime now) {
+        for (int attempt = 1; ; attempt++) {
+            ImportTaskRow row = new ImportTaskRow(taskId, tenantId, TASK_KIND, "PENDING",
+                    taskRepository.nextDefaultName(tenantId), upload.fileName(), upload.sha256(),
+                    request.sheets().size(), 0, 0, 0, paramsJson(request), null, null, "system", now, null, null);
+            try {
+                taskRepository.insert(row);
+                return;
+            } catch (DuplicateKeyException e) {
+                if (attempt >= 3) {
+                    throw e;
+                }
+            }
+        }
     }
 
     private String paramsJson(ImportCommitRequest request) {

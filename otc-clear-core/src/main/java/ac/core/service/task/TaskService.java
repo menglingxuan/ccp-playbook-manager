@@ -1,5 +1,8 @@
 package ac.core.service.task;
 
+import ac.core.common.ApiException;
+import ac.core.common.ErrorCode;
+import ac.core.common.PageQuery;
 import ac.core.common.PageResult;
 import ac.core.persistence.BatchFilter;
 import ac.core.persistence.ImportBatchRepository;
@@ -7,15 +10,21 @@ import ac.core.persistence.ImportBatchRow;
 import ac.core.persistence.ImportTaskRepository;
 import ac.core.persistence.ImportTaskRow;
 import ac.core.persistence.TaskFilter;
-import ac.core.common.PageQuery;
 import ac.core.common.JsonSupport;
 import ac.core.common.TimeProvider;
 import ac.core.persistence.TestCaseRepository;
 import ac.core.service.audit.AuditService;
+import ac.core.service.DataLayout;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,21 +35,29 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class TaskService {
 
+    private static final DateTimeFormatter UPLOAD_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /** Upper bound of a task name, matching the column width. */
+    public static final int MAX_NAME_LENGTH = 256;
+
     private final ImportTaskRepository taskRepository;
     private final ImportBatchRepository batchRepository;
     private final TestCaseRepository caseRepository;
     private final AuditService audit;
     private final JsonSupport json;
     private final TimeProvider time;
+    private final DataLayout dataLayout;
 
     public TaskService(ImportTaskRepository taskRepository, ImportBatchRepository batchRepository,
-            TestCaseRepository caseRepository, AuditService audit, JsonSupport json, TimeProvider time) {
+            TestCaseRepository caseRepository, AuditService audit, JsonSupport json, TimeProvider time,
+            DataLayout dataLayout) {
         this.taskRepository = taskRepository;
         this.batchRepository = batchRepository;
         this.caseRepository = caseRepository;
         this.audit = audit;
         this.json = json;
         this.time = time;
+        this.dataLayout = dataLayout;
     }
 
     /**
@@ -58,6 +75,91 @@ public class TaskService {
         var items = taskRepository.search(tenantId, filter);
         long total = taskRepository.count(tenantId, filter);
         return new PageResult<>(items, filter.page().page(), filter.page().size(), total);
+    }
+
+    /**
+     * Extra list data of the tasks: server side source location, whether that file still exists and
+     * the base products behind their batches.
+     *
+     * @param baseProducts distinct base product codes of the task batches
+     * @param sourcePath   stored location of the imported file, {@code null} when unknown
+     * @param sourceExists whether the stored file is still on disk
+     */
+    public record TaskListExtra(List<String> baseProducts, String sourcePath, boolean sourceExists) {
+
+        public TaskListExtra {
+            baseProducts = baseProducts == null ? List.of() : List.copyOf(baseProducts);
+        }
+    }
+
+    /**
+     * Resolves the extra list data of one page of tasks.
+     *
+     * <p>Office workbooks keep an immutable baseline under {@code batches/{batchId}/source.*}; CSV
+     * uploads only have the upload copy, which is purged when its TTL expires.
+     */
+    public Map<String, TaskListExtra> listExtras(String tenantId, List<ImportTaskRow> tasks) {
+        if (tasks.isEmpty()) {
+            return Map.of();
+        }
+        List<String> taskIds = tasks.stream().map(ImportTaskRow::id).toList();
+        Map<String, ImportBatchRow> firstBatch = new LinkedHashMap<>();
+        for (ImportBatchRow batch : batchRepository.listByTaskIds(tenantId, taskIds)) {
+            firstBatch.putIfAbsent(batch.taskId(), batch);
+        }
+        Map<String, List<String>> baseProducts = taskRepository.baseProductsByTask(tenantId, taskIds);
+        Map<String, TaskListExtra> extras = new LinkedHashMap<>();
+        for (ImportTaskRow task : tasks) {
+            String path = sourcePath(tenantId, firstBatch.get(task.id()));
+            extras.put(task.id(), new TaskListExtra(baseProducts.get(task.id()),
+                    path, path != null && Files.isRegularFile(Path.of(path))));
+        }
+        return extras;
+    }
+
+    /** Renames a task; the name stays unique inside the tenant and is capped at 256 characters. */
+    @Transactional
+    public void rename(String tenantId, String taskId, String rawName) {
+        ImportTaskRow task = taskRepository.find(tenantId, taskId)
+                .filter(row -> !"DELETED".equals(row.status()))
+                .orElseThrow(() -> ApiException.notFound("Task " + taskId + " does not exist"));
+        String name = rawName == null ? "" : rawName.trim();
+        if (name.isEmpty()) {
+            throw ApiException.invalid("Task name must not be empty");
+        }
+        if (name.length() > MAX_NAME_LENGTH) {
+            throw ApiException.invalid("Task name must be at most " + MAX_NAME_LENGTH + " characters");
+        }
+        if (name.equals(task.name())) {
+            return;
+        }
+        if (taskRepository.nameExists(tenantId, name)) {
+            throw new ApiException(ErrorCode.CONFLICT, "Task name '" + name + "' already exists",
+                    Map.of("name", name));
+        }
+        taskRepository.rename(tenantId, taskId, name);
+        audit.record(tenantId, AuditService.ENTITY_TASK, taskId, "RENAME", Map.of("name", name));
+    }
+
+    private String sourcePath(String tenantId, ImportBatchRow batch) {
+        if (batch == null) {
+            return null;
+        }
+        String root = dataLayout.root().resolve("tenants").resolve(tenantId).toString().replace('\\', '/');
+        String type = batch.sourceType() == null ? "" : batch.sourceType().toLowerCase(Locale.ROOT);
+        boolean workbook = "xlsx".equals(type) || "xls".equals(type);
+        if (workbook) {
+            // the baseline survives the upload TTL and is what export recalculation reads
+            return root + "/batches/" + batch.id() + "/source." + type;
+        }
+        if (batch.uploadId() == null) {
+            // clone batches have no source file of their own
+            return null;
+        }
+        LocalDate uploadDate = batch.createdAt().atZone(ZoneOffset.UTC)
+                .withZoneSameInstant(TimeProvider.DISPLAY_ZONE).toLocalDate();
+        return root + "/uploads/" + uploadDate.format(UPLOAD_DATE) + "/" + batch.uploadId() + "."
+                + (type.isEmpty() ? "csv" : type);
     }
 
     public TaskDetail detail(String tenantId, String taskId) {

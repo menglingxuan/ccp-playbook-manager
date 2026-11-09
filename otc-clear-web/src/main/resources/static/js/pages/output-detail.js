@@ -21,7 +21,7 @@ async function loadOutput() {
     ui.byId('outputSubtitle').textContent = `${output.status} · ${ui.bytes(output.sizeBytes)} · ${output.caseCount} 条用例`;
     ui.setHtml('outputInfo', `
       <div class="k">产出 ID</div><div class="v">${ui.escapeHtml(output.id)}</div>
-      <div class="k">外部任务</div><div class="v"><a href="/external-jobs/${encodeURIComponent(output.jobId)}">${ui.escapeHtml(output.jobId)}</a></div>
+      <div class="k">来源任务</div><div class="v">${ui.escapeHtml(output.jobId)}</div>
       <div class="k">相对路径</div><div class="v">${ui.escapeHtml(output.relativePath)}</div>
       <div class="k">SHA-256</div><div class="v">${ui.escapeHtml(output.sha256)}</div>
       <div class="k">批次</div><div class="v">${output.importedBatchId

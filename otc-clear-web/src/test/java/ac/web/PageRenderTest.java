@@ -9,7 +9,7 @@ class PageRenderTest extends AbstractIntegrationTest {
 
     @Test
     void pagesRender() {
-        String[] paths = {"/", "/import", "/products", "/meta", "/about", "/outputs", "/external-jobs"};
+        String[] paths = {"/", "/import", "/batches", "/products", "/meta", "/about", "/outputs"};
         for (String path : paths) {
             var response = api.get(path);
             assertThat(response.status()).as(path + " -> " + response.body()).isEqualTo(200);

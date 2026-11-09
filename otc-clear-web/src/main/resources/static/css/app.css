@@ -123,7 +123,33 @@ th { background: var(--surface-2); color: var(--muted); font-weight: 600; font-s
 tbody tr:hover td { background: var(--hover); }
 tbody tr.selected td { background: var(--accent-bg); }
 td.mono, .mono { font-family: var(--mono); font-size: 12px; }
-td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+td.num { text-align: center; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+th.num { text-align: center; }
+/* long identifiers stay readable: widening the column reveals more, never wraps */
+/* long identifiers stay readable: the zero-width block keeps the column shrinkable, so widening
+   the column reveals more of the uuid instead of the table always growing to the full text */
+td.id-cell .ellipsis { display: block; width: 0; min-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+td.id-cell { white-space: nowrap; }
+/* the id column keeps its full uuid readable; the name column stays comfortably wide */
+table thead th.id-col { width: 272px; }
+table thead th.name-col { width: 200px; }
+table thead th.source-col { width: 240px; }
+td.name-cell { max-width: 0; }
+td.name-cell .name-edit { display: block; width: 0; min-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; text-align: left; background: none; border: 0; padding: 0; font: inherit;
+  color: var(--text); cursor: text; }
+td.name-cell .name-edit:hover { color: var(--accent); }
+td.name-cell input.name-input { width: 100%; padding: 2px 6px; border: 1px solid var(--accent);
+  border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; }
+/* a source file that is no longer on disk keeps the row readable but marks the path as stale */
+.source-missing { text-decoration: line-through; color: var(--muted); }
+.base-products { display: flex; flex-wrap: wrap; gap: 4px; }
+td.source-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.source-cell .ellipsis { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-date { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.toolbar-date input[type="date"] { padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 12px; }
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--accent); }
 .empty { text-align: center; color: var(--muted); padding: 34px !important; }
@@ -241,6 +267,15 @@ th.sortable:hover { color: var(--accent); }
 .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 .legend span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
 .legend .trade::before { background: var(--accent-bg); border: 1px solid var(--accent); }
+.legend .fx::before { display: none; }
+/* column resizing: a slim grab area on the right edge of every resizeable header */
+table.resizable th { position: relative; }
+table.resizable th .col-grip { position: absolute; top: 0; right: 0; width: 8px; height: 100%;
+  cursor: col-resize; user-select: none; z-index: 2; }
+table.resizable th .col-grip:hover, table.resizable th .col-grip.active { background: var(--accent); opacity: .35; }
+/* formula marker: glyph only, so the column kind colour stays readable */
+.fx-flag { margin-left: 3px; font-size: 10px; font-style: italic; line-height: 1; color: var(--muted);
+  opacity: .85; cursor: help; vertical-align: super; }
 .legend .managed::before { background: var(--bar-bg); border: 1px solid var(--border); }
 .legend .unmapped::before { background: var(--mark-bg); border: 1px solid var(--warn); }
 /* column kinds of the preview table: one tint per kind, header and cells share it */
@@ -356,6 +391,9 @@ th.th-sort:hover { color: var(--accent); }
 th.th-sort .sort-arrow { font-size: 10px; color: var(--accent); margin-left: 3px; }
 th.th-sort.sorted { color: var(--accent); }
 th.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* the task table keeps the unsorted arrow muted so only the active column draws the eye */
+#taskTable th.th-sort:not(.sorted) .sort-arrow { color: var(--muted); opacity: .7; }
+#taskTable th.th-sort:not(.sorted):hover .sort-arrow { color: var(--accent); opacity: 1; }
 
 /* ---------- filter toolbar ---------- */
 .filters-bar {

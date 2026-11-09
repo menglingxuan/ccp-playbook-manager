@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('批次列表')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: topbar}"></header>
+<nav th:replace="~{fragments/layout :: nav('batches')}"></nav>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title">批次列表</h2>
+      <div class="page-sub">导入批次与克隆批次，点击批次号进入详情</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <input type="search" id="batchSearch" placeholder="搜索批次号 / 产品 / 源文件 / 备注…">
+    <select id="batchProduct"></select>
+    <select id="batchKind">
+      <option value="">全部来源</option>
+      <option value="IMPORT">文件导入</option>
+      <option value="CLONE">克隆</option>
+      <option value="OUTPUT">外部产出</option>
+    </select>
+    <div class="spacer"></div>
+    <button class="tool-btn" id="refreshBatchesBtn">刷新</button>
+  </div>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table id="batchTable">
+        <thead>
+        <tr>
+          <th>批次</th>
+          <th>产品</th>
+          <th>来源</th>
+          <th>Sheet</th>
+          <th class="num">行数</th>
+          <th class="num">无效</th>
+          <th>备注</th>
+          <th>创建时间</th>
+          <th data-no-resize="true">操作</th>
+        </tr>
+        </thead>
+        <tbody id="batchRows"></tbody>
+      </table>
+    </div>
+    <div class="panel-body">
+      <div class="pagination" id="batchPager"></div>
+    </div>
+  </section>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('batches')}"></th:block>
+</body>
+</html>

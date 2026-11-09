@@ -81,6 +81,19 @@ public class ImportBatchRepository {
                 .query(this::map).list();
     }
 
+    /** Batches of several tasks at once, oldest first, used to resolve source file locations. */
+    public List<ImportBatchRow> listByTaskIds(String tenantId, List<String> taskIds) {
+        if (taskIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("SELECT " + COLUMNS + """
+                         FROM import_batch WHERE tenant_id = :tenantId AND task_id IN (:taskIds)
+                           AND status <> 'DELETED' ORDER BY created_at, sheet_name
+                        """)
+                .param("tenantId", tenantId).param("taskIds", taskIds)
+                .query(this::map).list();
+    }
+
     public List<ImportBatchRow> search(String tenantId, BatchFilter filter) {
         StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM import_batch b WHERE b.tenant_id = :tenantId");
         Map<String, Object> params = new LinkedHashMap<>();
@@ -93,8 +106,13 @@ public class ImportBatchRepository {
             sql.append(" AND b.product_code = :product");
             params.put("product", filter.product().toUpperCase(java.util.Locale.ROOT));
         }
+        if (filter.kind() != null && !filter.kind().isBlank()) {
+            sql.append(" AND b.kind = :kind");
+            params.put("kind", filter.kind());
+        }
         if (filter.query() != null && !filter.query().isBlank()) {
-            sql.append(" AND (LOWER(b.source_filename) LIKE :query OR LOWER(b.sheet_name) LIKE :query)");
+            sql.append(" AND (LOWER(b.source_filename) LIKE :query OR LOWER(b.sheet_name) LIKE :query"
+                    + " OR LOWER(b.note) LIKE :query)");
             params.put("query", "%" + filter.query().trim().toLowerCase(java.util.Locale.ROOT) + "%");
         }
         sql.append(" ORDER BY b.created_at DESC LIMIT :limit OFFSET :offset");
@@ -115,8 +133,13 @@ public class ImportBatchRepository {
             sql.append(" AND b.product_code = :product");
             params.put("product", filter.product().toUpperCase(java.util.Locale.ROOT));
         }
+        if (filter.kind() != null && !filter.kind().isBlank()) {
+            sql.append(" AND b.kind = :kind");
+            params.put("kind", filter.kind());
+        }
         if (filter.query() != null && !filter.query().isBlank()) {
-            sql.append(" AND (LOWER(b.source_filename) LIKE :query OR LOWER(b.sheet_name) LIKE :query)");
+            sql.append(" AND (LOWER(b.source_filename) LIKE :query OR LOWER(b.sheet_name) LIKE :query"
+                    + " OR LOWER(b.note) LIKE :query)");
             params.put("query", "%" + filter.query().trim().toLowerCase(java.util.Locale.ROOT) + "%");
         }
         return jdbc.sql(sql.toString()).params(params).query(Long.class).single();

@@ -11,30 +11,15 @@
   <div class="filters" id="taskChips"></div>
 
   <div class="toolbar">
-    <input type="search" id="taskSearch" placeholder="搜索文件名 / 任务 ID / 产品…">
-    <select id="taskStatus">
-      <option value="">全部状态</option>
-      <option value="SUCCEEDED">SUCCEEDED</option>
-      <option value="PARTIAL">PARTIAL</option>
-      <option value="FAILED">FAILED</option>
-      <option value="RUNNING">RUNNING</option>
-      <option value="PENDING">PENDING</option>
-    </select>
-    <select id="taskKind">
-      <option value="">全部类型</option>
-      <option value="FILE_UPLOAD">文件导入</option>
-      <option value="EXTERNAL_OUTPUT">外部产出</option>
-    </select>
+    <input type="search" id="taskSearch" placeholder="搜索 任务 ID / 任务名称 / 文件名 / 基产品">
     <select id="taskProduct"></select>
-    <select id="taskSort">
-      <option value="created">按创建时间</option>
-      <option value="rows">按行数</option>
-      <option value="invalid">按无效行</option>
-      <option value="duration">按耗时</option>
-    </select>
+    <label class="toolbar-date">创建日期
+      <input type="date" id="taskFrom" aria-label="创建日期起">
+      <span class="muted">–</span>
+      <input type="date" id="taskTo" aria-label="创建日期止">
+    </label>
     <div class="spacer"></div>
     <button class="tool-btn primary" id="newImportBtn">新建导入</button>
-    <button class="tool-btn" id="refreshTasksBtn">刷新</button>
   </div>
 
   <section class="panel">
@@ -42,17 +27,14 @@
       <table id="taskTable">
         <thead>
         <tr>
-          <th>任务 ID</th>
+          <th class="id-col" title="任务 ID 为每次导入随机生成的 UUID">任务 ID</th>
+          <th class="name-col th-sort" data-sort="name" tabindex="0" title="按任务名称排序：升序 / 降序 / 原始顺序">任务名称<span class="sort-arrow"></span></th>
           <th>类型</th>
-          <th>源文件</th>
-          <th>状态</th>
-          <th class="num">Sheet</th>
-          <th class="num">批次</th>
-          <th class="num">有效行</th>
-          <th class="num">无效行</th>
-          <th class="num">耗时(s)</th>
-          <th>创建时间</th>
-          <th>操作</th>
+          <th class="source-col">源文件</th>
+          <th class="num th-sort" data-sort="batches" tabindex="0" title="按批次数排序：升序 / 降序 / 原始顺序">批次数<span class="sort-arrow"></span></th>
+          <th>基产品</th>
+          <th class="th-sort" data-sort="created" tabindex="0" title="按创建时间排序：升序 / 降序 / 原始顺序（默认倒序）">创建时间<span class="sort-arrow"></span></th>
+          <th data-no-resize="true">操作</th>
         </tr>
         </thead>
         <tbody id="taskRows"></tbody>

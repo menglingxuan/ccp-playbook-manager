@@ -14,8 +14,7 @@
 ```
 
 错误码：`INVALID_REQUEST`(400)、`NOT_FOUND`(404)、`CONFLICT`(409)、`DUPLICATE_IMPORT`(409)、
-`INVALID_STATE`(409)、`LIMIT_EXCEEDED`(413)、`UNSUPPORTED_MEDIA_TYPE`(415)、
-`EXTERNAL_UNAVAILABLE`(502)、`INTERNAL_ERROR`(500)。
+`INVALID_STATE`(409)、`LIMIT_EXCEEDED`(413)、`UNSUPPORTED_MEDIA_TYPE`(415)、`INTERNAL_ERROR`(500)。
 
 ## 上下文与产品
 
@@ -163,7 +162,8 @@
 导入会把工作簿（`xlsx` / `xls`）复制一份不可变基线到
 `data-root/tenants/{tenant}/batches/{batchId}/source.{ext}`，用于导出时重算公式；CSV 不产生基线。
 基线只写一次、读取时校验 `sha256` 与批次记录一致，复制失败时导入结果给 `BASELINE_MISSING` 警告但不阻断导入。
-| GET | `/api/tasks` | 分页：`status`、`kind`、`product`、`q`、`sort=created|rows|invalid|duration`、`page`、`size` |
+| GET | `/api/tasks` | 分页：`product`（基产品，匹配该任务任一批次产品的基产品）、`q`（源文件名 / 任务 ID / 任务名称 / 基产品）、`from` / `to`（创建日期，`yyyy-MM-dd`，含首尾，按展示时区解释）、`sort=created|name|batches|rows|invalid|duration`（可加 `_asc` / `_desc`，缺省按创建时间倒序）、`page`、`size`；返回项含 `name`（任务名称）、`batchCount`（批次数）、`baseProducts`（关联批次的基产品码）、`sourcePath`（服务端文件位置）、`sourceExists`（文件是否仍在磁盘上） |
+| PATCH | `/api/tasks/{id}/name` | 重命名任务：`name` 去空白后非空、≤256 字符、租户内唯一；重名返回 `409 CONFLICT` |
 | GET | `/api/tasks/summary` | 各状态任务数 |
 | GET | `/api/tasks/{id}` | 任务 + 批次 + 问题明细 |
 | GET | `/api/tasks/{id}/batches` | 任务下批次 |
@@ -175,7 +175,7 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/batches` | `product`、`q`、`includeExternal`、`page`、`size` |
+| GET | `/api/batches` | `product`、`q`（源文件 / Sheet / 备注）、`kind`、`includeExternal`、`page`、`size` |
 | GET | `/api/batches/{id}` | 批次详情（含 `activeCases`） |
 | PATCH | `/api/batches/{id}` | `{note}` |
 | DELETE | `/api/batches/{id}` | 软删批次与用例 |
@@ -228,20 +228,12 @@
 用例存储值，并在 `ExportResult.warnings` 中给出 `FORMULA_RECALC_WARNING` / `FORMULA_RECALC_INCOMPLETE` /
 `FORMULA_RECALC_SKIPPED` 说明；预检接口返回的 `sampleRow` 同样是重算后的值。
 
-## 外部任务与产出
+## 产出
+
+外部「批量导入工具」派发链路已移除（`/api/external-jobs/*` 不再提供），产出浏览端点保留用于查看历史产出：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/external-jobs/precheck` | `{caseIds}` → `valid` / `serviceEnabled` / `issues` |
-| POST | `/api/external-jobs` | 创建并派发 |
-| GET | `/api/external-jobs` | `status`、`product`、`q`、`page`、`size` |
-| GET | `/api/external-jobs/{id}` | 详情 + 产出列表 |
-| POST | `/api/external-jobs/{id}/refresh` | 主动拉取状态 |
-| POST | `/api/external-jobs/{id}/stop` | 停止 |
-| POST | `/api/external-jobs/{id}/callback` | 外部回调（token 校验） |
-| POST | `/api/external-jobs/{id}/scan` | 扫描产出并解析入库 |
-| GET | `/api/external-jobs/{id}/outputs` | 产出列表 |
-| GET | `/api/external-jobs/{jobId}/files/{outputId}/download` | 下载产出文件 |
 | GET | `/api/outputs` | 产出浏览（可 `jobId` 过滤） |
 | GET | `/api/outputs/{id}` | 产出详情 |
 | GET | `/api/outputs/{id}/cases` | 产出内用例 |
@@ -273,9 +265,9 @@
 | `/` | 任务面板 |
 | `/import` | 导入向导 |
 | `/tasks/{id}` | 任务详情 |
+| `/batches` | 批次列表（导入 + 克隆） |
 | `/batches/{id}` | 批次详情 |
 | `/outputs`、`/outputs/{id}` | 产出浏览 / 详情 |
-| `/external-jobs`、`/external-jobs/{id}` | 外部任务 / 详情 |
 | `/products` | 产品定义（平台 → 基产品 → 产品） |
 | `/meta` | 字段元信息 |
 | `/about` | 关于 |

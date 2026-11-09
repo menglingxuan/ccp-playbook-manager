@@ -7,21 +7,19 @@ import java.util.Map;
 /**
  * Runtime context for the UI shell.
  *
- * @param mode             TENANT or SINGLE
- * @param tenantId         bound tenant
- * @param dataRoot         storage root
- * @param version          application version
- * @param externalEnabled  whether the external tool is configured
- * @param limits           capability limits shown in the UI
- * @param exportDefaults   default CSV options
- * @param products         available products
+ * @param mode           TENANT or SINGLE
+ * @param tenantId       bound tenant
+ * @param dataRoot       storage root
+ * @param version        application version
+ * @param limits         capability limits shown in the UI
+ * @param exportDefaults default CSV options
+ * @param products       available products
  */
 public record ContextView(
         String mode,
         String tenantId,
         String dataRoot,
         String version,
-        boolean externalEnabled,
         LimitsView limits,
         Map<String, Object> exportDefaults,
         List<ProductView> products) {

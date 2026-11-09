@@ -118,7 +118,6 @@ function updateSelectionInfo() {
   ui.byId('bulkDeleteBtn').disabled = state.selected.size === 0;
   ui.byId('cloneBtn').disabled = state.selected.size === 0;
   ui.byId('exportBtn').disabled = false;
-  ui.byId('dispatchBtn').disabled = state.selected.size === 0;
 }
 
 async function deleteCase(id) {
@@ -285,45 +284,13 @@ function openExportPanel() {
   });
 }
 
-function openDispatchPanel() {
-  const ids = [...state.selected];
-  const modal = ui.openModal('用批量导入工具导入', `
-    <p class="muted" style="font-size:12px">将选中用例导出为 input CSV，分配任务文件夹并调用外部批量导入 API。</p>
-    <div id="dispatchBox" class="issues"></div>`,
-  `<button class="tool-btn" id="dispatchPrecheckBtn">预检</button>
-   <button class="tool-btn primary" id="dispatchRunBtn" disabled>派发</button>`);
-
-  modal.root.querySelector('#dispatchPrecheckBtn').addEventListener('click', async () => {
-    try {
-      const precheck = await post('/api/external-jobs/precheck', { caseIds: ids, options: null });
-      modal.root.querySelector('#dispatchBox').innerHTML = (precheck.issues || []).map((issue) => `
-        <div class="issue ${ui.escapeHtml(issue.level)}"><span>${ui.escapeHtml(issue.message)}</span>
-        <code>${ui.escapeHtml(issue.code)}</code></div>`).join('')
-        || `<div class="issue INFO"><span>预检通过，共 ${precheck.rowCount} 行</span></div>`;
-      modal.root.querySelector('#dispatchRunBtn').disabled = !precheck.valid || !precheck.serviceEnabled;
-    } catch (error) {
-      ui.showError(error);
-    }
-  });
-
-  modal.root.querySelector('#dispatchRunBtn').addEventListener('click', async () => {
-    try {
-      const job = await post('/api/external-jobs', { caseIds: ids, options: null });
-      modal.close();
-      window.location.href = `/external-jobs/${encodeURIComponent(job.id)}`;
-    } catch (error) {
-      ui.showError(error);
-    }
-  });
-}
-
 async function deleteBatch() {
   if (!window.confirm('删除批次会级联软删其用例，确定继续？')) {
     return;
   }
   try {
     await del(`/api/batches/${encodeURIComponent(batchId)}`);
-    window.location.href = state.batch && state.batch.taskId ? `/tasks/${state.batch.taskId}` : '/';
+    window.location.href = '/batches';
   } catch (error) {
     ui.showError(error);
   }
@@ -334,6 +301,7 @@ async function init() {
   await loadBatch();
   await loadCases();
   updateSelectionInfo();
+  ui.enableColumnResize(ui.byId('caseTable'), 'batch-cases');
 
   ui.on('caseSearch', 'input', debounce((event) => {
     state.q = event.target.value;
@@ -362,10 +330,10 @@ async function init() {
   ui.on('bulkDeleteBtn', 'click', bulkDelete);
   ui.on('cloneBtn', 'click', openClonePanel);
   ui.on('exportBtn', 'click', openExportPanel);
-  ui.on('dispatchBtn', 'click', openDispatchPanel);
   ui.on('deleteBatchBtn', 'click', deleteBatch);
+  ui.on('backToListBtn', 'click', () => { window.location.href = '/batches'; });
   ui.on('backBtn', 'click', () => {
-    window.location.href = state.batch && state.batch.taskId ? `/tasks/${state.batch.taskId}` : '/';
+    window.location.href = state.batch && state.batch.taskId ? `/tasks/${state.batch.taskId}` : '/batches';
   });
 }
 

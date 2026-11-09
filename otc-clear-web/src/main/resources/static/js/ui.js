@@ -451,8 +451,7 @@ export async function initShell() {
     const sub = byId('ctxSub');
     if (sub) {
       const productNames = ctx.products.map((product) => product.code).join(' / ');
-      sub.textContent = `v${ctx.version} · ${t('shell.products')} ${productNames} · `
-        + t(ctx.externalEnabled ? 'shell.external.on' : 'shell.external.off');
+      sub.textContent = `v${ctx.version} · ${t('shell.products')} ${productNames}`;
     }
     return ctx;
   } catch (error) {
@@ -471,6 +470,76 @@ export function shortId(value, length = 8) {
     return '';
   }
   return value.length > length ? `${value.slice(0, length)}…` : value;
+}
+
+const COLUMN_WIDTH_KEY = 'otc.colwidths';
+
+function storedColumnWidths(key) {
+  try {
+    return JSON.parse(localStorage.getItem(`${COLUMN_WIDTH_KEY}:${key}`) || '{}') || {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function storeColumnWidths(key, widths) {
+  try {
+    localStorage.setItem(`${COLUMN_WIDTH_KEY}:${key}`, JSON.stringify(widths));
+  } catch (error) {
+    // a full quota only costs the remembered widths
+  }
+}
+
+/**
+ * Adds a drag handle to every header cell so columns can be resized.
+ *
+ * <p>Widths are remembered per table key, header cells marked {@code data-no-resize} (the action
+ * column) stay fixed. Call after the table has been rendered at least once; re-rendering the rows
+ * keeps the widths because they live on the header cells.
+ */
+export function enableColumnResize(table, key) {
+  if (!table || table.dataset.resizeReady === 'true') {
+    return;
+  }
+  table.dataset.resizeReady = 'true';
+  table.classList.add('resizable');
+  const headers = [...table.querySelectorAll('thead th')];
+  const stored = storedColumnWidths(key);
+  headers.forEach((th, index) => {
+    if (th.dataset.noResize === 'true') {
+      return;
+    }
+    const saved = stored[index];
+    if (saved) {
+      th.style.width = `${saved}px`;
+      th.style.minWidth = `${saved}px`;
+    }
+    const grip = document.createElement('span');
+    grip.className = 'col-grip';
+    grip.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startWidth = th.getBoundingClientRect().width;
+      grip.classList.add('active');
+      const onMove = (moveEvent) => {
+        const width = Math.max(48, Math.round(startWidth + moveEvent.clientX - startX));
+        th.style.width = `${width}px`;
+        th.style.minWidth = `${width}px`;
+      };
+      const onUp = () => {
+        grip.classList.remove('active');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        const widths = storedColumnWidths(key);
+        widths[index] = Math.round(th.getBoundingClientRect().width);
+        storeColumnWidths(key, widths);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    th.appendChild(grip);
+  });
 }
 
 /** Flashes a row or list item to draw attention after a jump. */

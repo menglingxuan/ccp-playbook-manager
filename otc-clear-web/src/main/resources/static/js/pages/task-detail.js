@@ -73,6 +73,7 @@ async function removeTask() {
 async function init() {
   await ui.initShell();
   await load();
+  ui.enableColumnResize(document.querySelector('#batchRows').closest('table'), 'task-batches');
   ui.on('backBtn', 'click', () => { window.location.href = '/'; });
   ui.on('deleteTaskBtn', 'click', removeTask);
 }

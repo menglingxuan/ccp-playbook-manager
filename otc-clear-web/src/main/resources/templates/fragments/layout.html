@@ -45,10 +45,10 @@
        th:text="#{nav.tasks}">任务面板</a>
     <a class="nav-link" th:classappend="${active == 'import' ? 'active' : ''}" th:href="@{/import}"
        th:text="#{nav.import}">导入向导</a>
+    <a class="nav-link" th:classappend="${active == 'batches' ? 'active' : ''}" th:href="@{/batches}"
+       th:text="#{nav.batches}">批次列表</a>
     <a class="nav-link" th:classappend="${active == 'outputs' ? 'active' : ''}" th:href="@{/outputs}"
        th:text="#{nav.outputs}">产出浏览</a>
-    <a class="nav-link" th:classappend="${active == 'external' ? 'active' : ''}" th:href="@{/external-jobs}"
-       th:text="#{nav.external}">外部任务</a>
     <a class="nav-link" th:classappend="${active == 'products' ? 'active' : ''}" th:href="@{/products}"
        th:text="#{nav.products}">产品定义</a>
     <a class="nav-link" th:classappend="${active == 'meta' ? 'active' : ''}" th:href="@{/meta}"

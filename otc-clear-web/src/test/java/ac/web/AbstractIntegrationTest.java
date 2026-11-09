@@ -15,7 +15,6 @@ import tools.jackson.databind.JsonNode;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.datasource.url=jdbc:h2:mem:ottest;DB_CLOSE_DELAY=-1",
         "app.data-root=build/test-data",
-        "app.external.enabled=false",
         "app.tenant.id=default"
 })
 public abstract class AbstractIntegrationTest {

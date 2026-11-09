@@ -19,7 +19,7 @@ async function load() {
     const rows = result.items.map((output) => `
       <tr>
         <td class="mono">${ui.escapeHtml(output.fileName)}<div class="mono-sm">${ui.escapeHtml(output.relativePath)}</div></td>
-        <td class="mono"><a href="/external-jobs/${encodeURIComponent(output.jobId)}">${ui.shortId(output.jobId, 8)}</a></td>
+        <td class="mono">${ui.shortId(output.jobId, 8)}</td>
         <td>${ui.statusBadge(output.status)}</td>
         <td class="num">${ui.bytes(output.sizeBytes)}</td>
         <td class="num">${output.caseCount}</td>

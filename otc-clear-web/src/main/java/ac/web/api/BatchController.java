@@ -33,12 +33,13 @@ public class BatchController {
     @GetMapping
     public Map<String, Object> list(@RequestParam(required = false) String product,
             @RequestParam(required = false, name = "q") String query,
+            @RequestParam(required = false) String kind,
             @RequestParam(required = false, defaultValue = "false") boolean includeExternal,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size) {
         PageQuery pageQuery = PageQuery.of(page, size);
         var result = batchService.search(tenantProvider.tenantId(),
-                new BatchFilter(product, query, includeExternal, pageQuery));
+                new BatchFilter(product, query, kind, includeExternal, pageQuery));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("items", result.items().stream().map(ViewMapper::batch).toList());
         body.put("page", result.page());

@@ -369,6 +369,149 @@ class ImportFlowTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void taskListFiltersByCreationDateAndExposesTheSourcePath() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String csv = CSV_TEMPLATE.formatted("PATH-" + suffix, "PATH-" + suffix);
+        var upload = api.upload("/api/uploads", "path_" + suffix + ".csv", csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(upload.ok()).as(upload.body()).isTrue();
+        var imported = api.post("/api/imports", api.toJson(Map.of(
+                "uploadId", upload.json().get("uploadId").asString(), "force", false,
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
+        assertThat(imported.ok()).as(imported.body()).isTrue();
+        String taskId = imported.json().get("taskId").asString();
+
+        String today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString();
+        JsonNode todayPage = api.get("/api/tasks?q=" + taskId + "&from=" + today + "&to=" + today).json();
+        assertThat(todayPage.get("total").asInt()).isEqualTo(1);
+        JsonNode item = todayPage.get("items").get(0);
+        assertThat(item.get("id").asString()).isEqualTo(taskId);
+        assertThat(item.get("sourcePath").asString())
+                .contains("/uploads/").contains(upload.json().get("uploadId").asString()).endsWith(".csv");
+        assertThat(item.get("sourceExists").asBoolean()).isTrue();
+        assertThat(item.get("baseProducts").toString()).contains("\"IRS\"");
+        assertThat(item.get("name").asString()).isNotEmpty();
+
+        String tomorrow = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).plusDays(1).toString();
+        assertThat(api.get("/api/tasks?q=" + taskId + "&from=" + tomorrow).json().get("total").asInt())
+                .as("a future start date excludes the task").isZero();
+
+        // the product filter works on base products, so any derivative of IRS matches
+        assertThat(api.get("/api/tasks?q=" + taskId + "&product=IRS").json().get("total").asInt())
+                .isEqualTo(1);
+        assertThat(api.get("/api/tasks?q=" + taskId + "&product=OIS").json().get("total").asInt()).isZero();
+
+        // the free text search also matches the task name
+        String taskName = item.get("name").asString();
+        assertThat(api.get("/api/tasks?q=" + java.net.URLEncoder.encode(taskName, StandardCharsets.UTF_8))
+                .json().get("total").asInt()).as("the task name is searchable").isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    void taskNameIsUniqueAndCanBeRenamed() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String first = importCsv("name_a_" + suffix + ".csv", CSV_TEMPLATE.formatted("N1-" + suffix, "N1-" + suffix),
+                productCode);
+        String second = importCsv("name_b_" + suffix + ".csv", CSV_TEMPLATE.formatted("N2-" + suffix, "N2-" + suffix),
+                productCode);
+        String firstName = taskItem(first).get("name").asString();
+        String secondName = taskItem(second).get("name").asString();
+        assertThat(firstName).isNotBlank();
+        assertThat(secondName).as("default names stay unique").isNotEqualTo(firstName);
+
+        String unique = "Renamed " + suffix;
+        assertThat(api.patch("/api/tasks/" + first + "/name", api.toJson(Map.of("name", "  " + unique + "  "))).ok())
+                .isTrue();
+        assertThat(taskItem(first).get("name").asString()).isEqualTo(unique);
+
+        var duplicate = api.patch("/api/tasks/" + second + "/name", api.toJson(Map.of("name", unique)));
+        assertThat(duplicate.status()).isEqualTo(409);
+        assertThat(duplicate.json().get("code").asString()).isEqualTo("CONFLICT");
+
+        var blank = api.patch("/api/tasks/" + second + "/name", api.toJson(Map.of("name", "   ")));
+        assertThat(blank.status()).isEqualTo(400);
+
+        var tooLong = api.patch("/api/tasks/" + second + "/name",
+                api.toJson(Map.of("name", "x".repeat(257))));
+        assertThat(tooLong.status()).isEqualTo(400);
+    }
+
+    @Test
+    void taskListSortsByNameBatchCountAndCreationTime() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8).toLowerCase();
+        List<String> keep = List.of("testCaseId", "remarks", "tradeId", "tradeDate", "maturityDate",
+                "notional", "notionalCurrency", "fixedRate", "direction");
+        String firstProduct = productWithFields("MW", "IRS", keep);
+        String secondProduct = productWithFields("MW", "IRS", keep);
+        String older = importCsv("sort_a_" + suffix + ".csv",
+                CSV_TEMPLATE.formatted("SA-" + suffix, "SA-" + suffix), firstProduct);
+        // created_at is stored per second, so keep the two tasks in different seconds
+        Thread.sleep(1100);
+        String newer = importCsvWithTwoBatches("sort_b_" + suffix + ".csv",
+                CSV_TEMPLATE.formatted("SB-" + suffix, "SB-" + suffix), firstProduct, secondProduct);
+        rename(older, "Sort-" + suffix + "-a");
+        rename(newer, "Sort-" + suffix + "-z");
+        String q = "Sort-" + suffix;
+
+        assertThat(taskItem(newer).get("batchCount").asInt()).as("one batch per submitted sheet").isEqualTo(2);
+
+        assertThat(taskIds("/api/tasks?q=" + q + "&sort=created_asc"))
+                .as("ascending creation time").containsExactly(older, newer);
+        assertThat(taskIds("/api/tasks?q=" + q + "&sort=created_desc")).containsExactly(newer, older);
+        assertThat(taskIds("/api/tasks?q=" + q)).as("the default order is newest first")
+                .containsExactly(newer, older);
+
+        assertThat(taskIds("/api/tasks?q=" + q + "&sort=name_asc")).containsExactly(older, newer);
+        assertThat(taskIds("/api/tasks?q=" + q + "&sort=name_desc")).containsExactly(newer, older);
+
+        assertThat(taskIds("/api/tasks?q=" + q + "&sort=batches_asc")).containsExactly(older, newer);
+        assertThat(taskIds("/api/tasks?q=" + q + "&sort=batches_desc")).containsExactly(newer, older);
+    }
+
+    private void rename(String taskId, String name) {
+        var response = api.patch("/api/tasks/" + taskId + "/name", api.toJson(Map.of("name", name)));
+        assertThat(response.ok()).as(response.body()).isTrue();
+    }
+
+    private List<String> taskIds(String path) {
+        JsonNode page = api.get(path).json();
+        List<String> ids = new java.util.ArrayList<>();
+        page.get("items").forEach(item -> ids.add(item.get("id").asString()));
+        return ids;
+    }
+
+    private String importCsvWithTwoBatches(String fileName, String csv, String firstProduct,
+            String secondProduct) {
+        var upload = api.upload("/api/uploads", fileName, csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(upload.ok()).as(upload.body()).isTrue();
+        var imported = api.post("/api/imports", api.toJson(Map.of(
+                "uploadId", upload.json().get("uploadId").asString(), "force", false,
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", firstProduct),
+                        Map.of("sheetIndex", 0, "productCode", secondProduct)))));
+        assertThat(imported.ok()).as(imported.body()).isTrue();
+        return imported.json().get("taskId").asString();
+    }
+
+    private JsonNode taskItem(String taskId) {
+        JsonNode page = api.get("/api/tasks?q=" + taskId).json();
+        assertThat(page.get("total").asInt()).isEqualTo(1);
+        return page.get("items").get(0);
+    }
+
+    private String importCsv(String fileName, String csv, String productCode) {
+        var upload = api.upload("/api/uploads", fileName, csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(upload.ok()).as(upload.body()).isTrue();
+        var imported = api.post("/api/imports", api.toJson(Map.of(
+                "uploadId", upload.json().get("uploadId").asString(), "force", false,
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
+        assertThat(imported.ok()).as(imported.body()).isTrue();
+        return imported.json().get("taskId").asString();
+    }
+
+    @Test
     void invalidParamsReturnProblemDetail() {
         var response = api.post("/api/uploads/00000000-0000-0000-0000-000000000000/preview",
                 api.toJson(Map.of("sheetIndex", 0)));

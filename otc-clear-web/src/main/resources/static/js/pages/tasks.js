@@ -1,7 +1,12 @@
-import { context, del, get, query } from '../api.js';
+import { del, get, patch, query } from '../api.js';
 import * as ui from '../ui.js';
 
-const state = { page: 1, size: 25, status: '', kind: '', product: '', q: '', sort: 'created' };
+const state = { page: 1, size: 25, product: '', q: '', from: '', to: '', sort: '' };
+
+const NAME_MAX_LENGTH = 256;
+
+/** Sortable headers cycle through ascending, descending and the original order. */
+const SORT_FIELDS = new Set(['name', 'batches', 'created']);
 
 function debounce(fn, delay = 300) {
   let timer = null;
@@ -20,18 +25,10 @@ function renderSummary(summary) {
     { key: 'RUNNING', label: '进行中', value: summary.RUNNING || 0 },
   ];
   ui.setHtml('summaryCards', cards.map((card) => `
-    <div class="card clickable ${state.status === card.key && card.key !== '' ? 'active-filter' : ''}" data-status="${card.key}">
+    <div class="card">
       <div class="card-label">${card.label}</div>
       <div class="card-value ${card.tone || ''}">${card.value}</div>
     </div>`).join(''));
-  document.querySelectorAll('#summaryCards .card').forEach((card) => {
-    card.addEventListener('click', () => {
-      state.status = card.dataset.status;
-      state.page = 1;
-      ui.byId('taskStatus').value = state.status;
-      load();
-    });
-  });
 }
 
 async function loadSummary() {
@@ -42,23 +39,39 @@ async function loadSummary() {
   }
 }
 
-async function load() {
-  try {
-    const result = await get('/api/tasks' + query({
-      status: state.status, kind: state.kind, product: state.product,
-      q: state.q, sort: state.sort, page: state.page, size: state.size,
-    }));
-    const rows = result.items.map((task) => `
-      <tr>
-        <td class="mono"><a href="/tasks/${encodeURIComponent(task.id)}">${ui.shortId(task.id, 8)}</a></td>
+function baseProductCell(task) {
+  const codes = task.baseProducts || [];
+  if (!codes.length) {
+    return '<span class="muted">—</span>';
+  }
+  const text = codes.join(', ');
+  return `<span class="base-products" title="${ui.escapeHtml(text)}">${ui.escapeHtml(text)}</span>`;
+}
+
+function sourceCell(task) {
+  const missing = task.sourceExists === false;
+  const tip = missing
+    ? `文件已失效：${task.sourcePath || task.sourceName || ''}`
+    : (task.sourcePath || task.sourceName || '');
+  return `<td class="mono source-cell" title="${ui.escapeHtml(tip)}">`
+    + `<span class="ellipsis${missing ? ' source-missing' : ''}">${ui.escapeHtml(task.sourceName)}</span></td>`;
+}
+
+function rowHtml(task) {
+  return `
+      <tr data-task="${ui.escapeHtml(task.id)}">
+        <td class="mono id-cell" title="${ui.escapeHtml(task.id)}">
+          <span class="ellipsis">${ui.escapeHtml(task.id)}</span>
+        </td>
+        <td class="name-cell">
+          <button type="button" class="name-edit" data-rename="${ui.escapeHtml(task.id)}"
+                  data-name="${ui.escapeHtml(task.name || '')}"
+                  title="${ui.escapeHtml(task.name || '')}（点击重命名）">${ui.escapeHtml(task.name || '')}</button>
+        </td>
         <td>${task.kind === 'EXTERNAL_OUTPUT' ? '<span class="chip muted">外部产出</span>' : '<span class="chip info">文件导入</span>'}</td>
-        <td>${ui.escapeHtml(task.sourceName)}</td>
-        <td>${ui.statusBadge(task.status)}</td>
-        <td class="num">${task.sheetCount}</td>
-        <td class="num">${task.batchCount}</td>
-        <td class="num">${task.totalRows}</td>
-        <td class="num ${task.invalidRows > 0 ? 'num-fail' : ''}">${task.invalidRows}</td>
-        <td class="num">${task.durationSeconds || 0}</td>
+        ${sourceCell(task)}
+        <td class="num" title="${ui.escapeHtml(String(task.batchCount ?? 0))} 个批次">${task.batchCount ?? 0}</td>
+        <td>${baseProductCell(task)}</td>
         <td class="mono">${ui.escapeHtml(task.createdAt)}</td>
         <td>
           <div class="row-actions">
@@ -66,11 +79,52 @@ async function load() {
             <button class="tool-btn small danger" data-delete="${ui.escapeHtml(task.id)}">删除</button>
           </div>
         </td>
-      </tr>`);
+      </tr>`;
+}
+
+/** Paints the sort arrows of the header so the current order and direction stay visible. */
+function renderSortHeaders() {
+  document.querySelectorAll('#taskTable thead th[data-sort]').forEach((th) => {
+    const field = th.dataset.sort;
+    const active = state.sort.startsWith(field + '_');
+    th.classList.toggle('sorted', active);
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) {
+      arrow.textContent = !active ? '⇅' : state.sort.endsWith('_asc') ? '↑' : '↓';
+    }
+  });
+}
+
+function cycleSort(field) {
+  if (!SORT_FIELDS.has(field)) {
+    return;
+  }
+  if (state.sort === `${field}_asc`) {
+    state.sort = `${field}_desc`;
+  } else if (state.sort === `${field}_desc`) {
+    state.sort = '';
+  } else {
+    state.sort = `${field}_asc`;
+  }
+  state.page = 1;
+  renderSortHeaders();
+  load();
+}
+
+async function load() {
+  try {
+    const result = await get('/api/tasks' + query({
+      product: state.product, q: state.q, from: state.from, to: state.to, sort: state.sort,
+      page: state.page, size: state.size,
+    }));
+    const rows = result.items.map(rowHtml);
     ui.setHtml('taskRows', rows.length ? rows.join('')
-      : '<tr><td colspan="11" class="empty">还没有导入任务，点击「新建导入」上传用例文件</td></tr>');
+      : '<tr><td colspan="8" class="empty">还没有导入任务，点击「新建导入」上传用例文件</td></tr>');
     ui.byId('taskRows').querySelectorAll('button[data-delete]').forEach((button) => {
       button.addEventListener('click', () => removeTask(button.dataset.delete));
+    });
+    ui.byId('taskRows').querySelectorAll('button[data-rename]').forEach((button) => {
+      button.addEventListener('click', () => startRename(button));
     });
     ui.renderPager('taskPager', result.page, result.totalPages, result.total, (page) => {
       state.page = page;
@@ -79,6 +133,65 @@ async function load() {
   } catch (error) {
     ui.showError(error);
   }
+}
+
+/** Swaps the name cell into an input; Enter or blur commits, Escape cancels. */
+function startRename(button) {
+  if (button.dataset.editing === 'true') {
+    return;
+  }
+  button.dataset.editing = 'true';
+  const original = button.dataset.name;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'name-input';
+  input.maxLength = NAME_MAX_LENGTH;
+  input.value = original;
+  button.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = async (commit) => {
+    if (done) {
+      return;
+    }
+    done = true;
+    const next = input.value.trim();
+    if (!commit || next === original) {
+      input.replaceWith(button);
+      button.dataset.editing = 'false';
+      return;
+    }
+    if (!next) {
+      ui.toast('任务名称不能为空', 'bad');
+      input.replaceWith(button);
+      button.dataset.editing = 'false';
+      return;
+    }
+    try {
+      await patch(`/api/tasks/${encodeURIComponent(button.dataset.rename)}/name`, { name: next });
+      button.dataset.name = next;
+      button.textContent = next;
+      button.title = `${next}（点击重命名）`;
+      ui.toast('任务名称已更新', 'ok');
+    } catch (error) {
+      ui.showError(error);
+    }
+    input.replaceWith(button);
+    button.dataset.editing = 'false';
+  };
+
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener('blur', () => finish(true));
 }
 
 async function removeTask(id) {
@@ -95,46 +208,72 @@ async function removeTask(id) {
   }
 }
 
-async function init() {
-  const ctx = await ui.initShell();
-  if (ctx) {
-    const select = ui.byId('taskProduct');
-    select.innerHTML = '<option value="">全部产品</option>' + ctx.products
-      .map((product) => `<option value="${product.code}">${product.code}</option>`).join('');
+/** Base products grouped by platform, so the filter follows the definition hierarchy. */
+async function loadBaseProductOptions() {
+  const select = ui.byId('taskProduct');
+  if (!select) {
+    return;
   }
+  const options = ['<option value="">全部基产品</option>'];
+  try {
+    const platforms = await get('/api/catalog');
+    platforms.forEach((platform) => {
+      const items = platform.baseProducts || [];
+      if (!items.length) {
+        return;
+      }
+      options.push(`<optgroup label="${ui.escapeHtml(platform.name || platform.code)}">`);
+      items.forEach((base) => {
+        options.push(`<option value="${ui.escapeHtml(base.code)}">${ui.escapeHtml(base.code)}</option>`);
+      });
+      options.push('</optgroup>');
+    });
+  } catch (error) {
+    ui.showError(error);
+  }
+  select.innerHTML = options.join('');
+}
+
+async function init() {
+  await ui.initShell();
+  await loadBaseProductOptions();
   renderSummary({});
   await loadSummary();
   await load();
+  ui.enableColumnResize(ui.byId('taskTable'), 'tasks-v2');
+  renderSortHeaders();
+
+  const table = ui.byId('taskTable');
+  table.querySelector('thead').addEventListener('click', (event) => {
+    const th = event.target.closest('th[data-sort]');
+    if (th) {
+      cycleSort(th.dataset.sort);
+    }
+  });
+  table.querySelector('thead').addEventListener('keydown', (event) => {
+    const th = event.target.closest('th[data-sort]');
+    if (th && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      cycleSort(th.dataset.sort);
+    }
+  });
 
   ui.on('taskSearch', 'input', debounce((event) => {
     state.q = event.target.value;
     state.page = 1;
     load();
   }, 350));
-  ui.on('taskStatus', 'change', (event) => {
-    state.status = event.target.value;
-    state.page = 1;
-    loadSummary();
-    load();
-  });
-  ui.on('taskKind', 'change', (event) => {
-    state.kind = event.target.value;
-    state.page = 1;
-    load();
-  });
   ui.on('taskProduct', 'change', (event) => {
     state.product = event.target.value;
     state.page = 1;
     load();
   });
-  ui.on('taskSort', 'change', (event) => {
-    state.sort = event.target.value;
+  ['taskFrom', 'taskTo'].forEach((id) => ui.on(id, 'change', () => {
+    state.from = ui.byId('taskFrom').value;
+    state.to = ui.byId('taskTo').value;
+    state.page = 1;
     load();
-  });
-  ui.on('refreshTasksBtn', 'click', () => {
-    loadSummary();
-    load();
-  });
+  }));
   ui.on('newImportBtn', 'click', () => {
     window.location.href = '/import';
   });

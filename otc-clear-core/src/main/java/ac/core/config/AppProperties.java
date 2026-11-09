@@ -20,7 +20,6 @@ public class AppProperties {
     private Limits limits = new Limits();
     private Ids ids = new Ids();
     private Export export = new Export();
-    private External external = new External();
 
     /** Reserved word friendly accessor for {@code app.import.*}. */
     @Setter(AccessLevel.NONE)
@@ -51,8 +50,6 @@ public class AppProperties {
         private int maxCloneCount = 200;
         private int maxBulkDelete = 500;
         private long uploadTtlMinutes = 60;
-        private int maxScanFiles = 200;
-        private long maxScanFileSize = 104_857_600L;
         /** Rows read for the wizard preview; the full parse happens on submit. */
         private int previewRowLimit = 300;
         private int previewSampleRows = 20;
@@ -88,22 +85,5 @@ public class AppProperties {
         private String defaultLineEnding = "CRLF";
         private boolean defaultBom = false;
         private ManagedColumnScope defaultManagedColumns = ManagedColumnScope.KNOWN;
-    }
-
-    @Getter
-    @Setter
-    public static class External {
-        private boolean enabled = false;
-        private String baseUrl = "";
-        private String dispatchPath = "/api/jobs";
-        private String statusPath = "/api/jobs/{externalJobId}";
-        private String stopPath = "/api/jobs/{externalJobId}/stop";
-        private String callbackToken = "";
-        private String callbackBaseUrl = "";
-        private Duration connectTimeout = Duration.ofSeconds(5);
-        private Duration readTimeout = Duration.ofSeconds(30);
-        private Duration pollInterval = Duration.ofSeconds(5);
-        private Duration pollMaxDuration = Duration.ofHours(2);
-        private String folderRoot = "";
     }
 }

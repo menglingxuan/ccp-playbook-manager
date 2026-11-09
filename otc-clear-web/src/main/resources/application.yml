@@ -18,8 +18,6 @@ app:
     max-clone-count: 200
     max-bulk-delete: 500
     upload-ttl-minutes: 60
-    max-scan-files: 200
-    max-scan-file-size: 104857600
     preview-row-limit: 300
     preview-sample-rows: 20
     max-issue-details: 200
@@ -35,19 +33,6 @@ app:
     default-line-ending: CRLF
     default-bom: false
     default-managed-columns: KNOWN
-  external:
-    enabled: false
-    base-url: http://127.0.0.1:9000
-    dispatch-path: /api/jobs
-    status-path: /api/jobs/{externalJobId}
-    stop-path: /api/jobs/{externalJobId}/stop
-    callback-token: change-me
-    callback-base-url: http://127.0.0.1:8080
-    connect-timeout: 5s
-    read-timeout: 30s
-    poll-interval: 5s
-    poll-max-duration: 2h
-    folder-root: ""
 
 spring:
   application:

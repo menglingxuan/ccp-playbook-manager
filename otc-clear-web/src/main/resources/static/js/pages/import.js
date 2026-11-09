@@ -169,6 +169,26 @@ function rawRange() {
   };
 }
 
+/** Cell marker for a formula: colour is already taken by the column kind, so use a glyph instead. */
+function formulaFlag(formula) {
+  if (!formula) {
+    return '';
+  }
+  return `<span class="fx-flag" title="${ui.escapeHtml(formula)}">ƒ</span>`;
+}
+
+/** Formula text behind a preview cell, if the source cell carries one. */
+function formulaOf(row, assignment) {
+  const formulas = row.formulas || {};
+  if (assignment.kind === 'TRADE') {
+    return formulas[assignment.fieldKey];
+  }
+  if (assignment.kind === 'MANAGED') {
+    return formulas[assignment.managedKey];
+  }
+  return null;
+}
+
 function renderRawPreview() {
   const raw = state.raw;
   if (!raw) {
@@ -193,7 +213,8 @@ function renderRawPreview() {
   ui.setHtml('previewBody', dataRows.length ? dataRows.map((row) => {
     const cells = [];
     for (let column = 0; column < columnCount; column++) {
-      cells.push(`<td class="mono">${ui.escapeHtml(row.values[column] || '')}</td>`);
+      cells.push(`<td class="mono">${ui.escapeHtml(row.values[column] || '')}${
+        formulaFlag((row.formulas || [])[column])}</td>`);
     }
     return `<tr><td class="num">${row.row}</td>${cells.join('')}</tr>`;
   }).join('') : '<tr><td class="empty">没有数据行</td></tr>');
@@ -246,7 +267,7 @@ function renderPreview() {
       const invalid = (row.issues || []).some((issue) => issue.fieldKey
         && issue.fieldKey === (assignment.fieldKey || assignment.managedKey));
       return `<td class="mono ${columnClass(assignment)} ${
-        invalid ? 'num-fail' : ''}">${ui.escapeHtml(text)}</td>`;
+        invalid ? 'num-fail' : ''}">${ui.escapeHtml(text)}${formulaFlag(formulaOf(row, assignment))}</td>`;
     });
     return `<tr><td class="num">${row.row}</td>${cells.join('')}</tr>`;
   });
