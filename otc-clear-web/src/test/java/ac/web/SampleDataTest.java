@@ -30,7 +30,7 @@ class SampleDataTest extends AbstractIntegrationTest {
         var upload = api.upload("/api/uploads", "irs_workbook.xlsx", workbook);
         assertThat(upload.ok()).as(upload.body()).isTrue();
         JsonNode sheets = upload.json().get("sheets");
-        assertThat(sheets).hasSize(4);
+        assertThat(sheets).hasSize(5);
 
         int wideIndex = -1;
         for (JsonNode sheet : sheets) {
@@ -79,9 +79,44 @@ class SampleDataTest extends AbstractIntegrationTest {
                 .isEqualTo(SampleWorkbookGenerator.WIDE_ROW_COUNT);
     }
 
+    /**
+     * The MW/IRS template opens its trade block with the required Report Timestamp, so the standard
+     * sheet maps without a single missing field.
+     */
     @Test
-    void wideCsvKeepsSeventyColumnsAndOneHundredRows() throws IOException {
+    void standardSheetMapsTheReportTimestampColumn() throws IOException {
         SampleWorkbookGenerator.generate(samples);
+        byte[] workbook = Files.readAllBytes(samples.resolve("irs_workbook.xlsx"));
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks",
+                "reportTimestamp", "tradeId", "tradeDate", "maturityDate", "notional", "notionalCurrency",
+                "fixedRate", "direction"));
+
+        var upload = api.upload("/api/uploads", "irs_workbook.xlsx", workbook);
+        int sheetIndex = -1;
+        for (JsonNode sheet : upload.json().get("sheets")) {
+            if (SampleWorkbookGenerator.STANDARD_SHEET_NAME.equals(sheet.get("name").asString())) {
+                sheetIndex = sheet.get("index").asInt();
+            }
+        }
+        assertThat(sheetIndex).as("IRS.Standard sheet must exist").isGreaterThanOrEqualTo(0);
+
+        var preview = api.post("/api/uploads/" + upload.json().get("uploadId").asString() + "/preview",
+                api.toJson(java.util.Map.of("sheetIndex", sheetIndex, "productCode", productCode)));
+        assertThat(preview.ok()).as(preview.body()).isTrue();
+        JsonNode sheetPreview = preview.json().get("preview");
+        assertThat(sheetPreview.get("valid").asBoolean()).as(preview.body()).isTrue();
+        assertThat(sheetPreview.get("layout").get("missingFields")).isEmpty();
+
+        JsonNode sample = sheetPreview.get("sampleRows").get(0);
+        assertThat(sample.get("values").get("reportTimestamp").asString())
+                .isEqualTo("2026-11-09T20:34:00.970");
+        assertThat(sample.get("values").get("tradeId").asString()).isEqualTo("IRS-1001");
+        assertThat(sample.get("managed").get("_Remarks").asString()).isEqualTo("standard row 1");
+        assertThat(sample.get("extras").get("Extra Ref").asString()).isEqualTo("REF-A");
+    }
+
+    @Test
+    void wideCsvKeepsSeventyColumnsAndOneHundredRows() throws IOException {        SampleWorkbookGenerator.generate(samples);
         byte[] csv = Files.readAllBytes(samples.resolve(SampleWorkbookGenerator.WIDE_CSV_FILE));
 
         var upload = api.upload("/api/uploads", SampleWorkbookGenerator.WIDE_CSV_FILE, csv);

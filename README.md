@@ -147,7 +147,8 @@ REST API 见 [docs/REST接口.md](./docs/REST接口.md)，CSV 细节见 [docs/CS
   才会在导入时被识别为管理列，可选或必填）。业务键（Trade ID 一类的唯一标识列）由内部的 `key_flag` 标记维护，
   不再作为独立角色展示。
 - **序号唯一**：新增或编辑字段时序号不能与其他字段重复，前端即时提示「序号 n 已被其他字段占用」，服务端返回 `409`。
-- **预置模板**：`MW / IRS` 26 个字段（`_TestCaseId`、`_Remarks` + 24 个业务字段，含重名的两个 `Rate`，默认严格模式）、
+- **预置模板**：`MW / IRS` 27 个字段（`_TestCaseId`、`_Remarks` + 25 个业务字段，交易块首列为必填的
+  `Report Timestamp`，含重名的两个 `Rate`，默认严格模式）、
   `MW / OIS` 22 个字段（`_TestCaseId`、`_Remarks` + 20 个业务字段）、`MW / CCSIRS` 70 个字段（4 个管理字段
   `_TestCaseId`、`_Remarks`、`Scenario Group`、`Priority` + 66 个业务字段，其中前 50 个为必填）；
   另有 `IRS_DUP_DRAFT` 保留重名列且非严格，用于验证「无效」状态。派生产品从这些字段派生后按需删减。
@@ -195,8 +196,9 @@ REST API 见 [docs/REST接口.md](./docs/REST接口.md)，CSV 细节见 [docs/CS
 6. **管理列**：只有产品定义中声明为 `MANAGED` 的字段才算管理列，写入 `managed_json`
    （`_TestCaseId` 落到独立列）。没有声明的列（包括文件里的 `_TestCaseId` / `_Remarks`）都是**未映射列**，
    进入 `extras`；要保留它们，就在产品定义里声明为管理字段。
-   出厂种子中 `MW/IRS`（26 个字段）与 `MW/OIS`（22 个字段）都声明了 `_TestCaseId`、`_Remarks`，`MW/CCSIRS` 额外声明了
-   `Scenario Group`、`Priority`（合计 70 个字段）。
+   出厂种子中 `MW/IRS`（27 个字段）与 `MW/OIS`（22 个字段）都声明了 `_TestCaseId`、`_Remarks`，`MW/CCSIRS` 额外声明了
+   `Scenario Group`、`Priority`（合计 70 个字段）。`MW/IRS` 的 `Report Timestamp` 是业务字段（交易块首列、恒必填），
+   Excel 中的时间单元格按原样保存为文本，例如 `2026-11-09T20:34:00.970`。
 7. **产出隔离**：外部产出用例 `origin=EXTERNAL_OUTPUT`，只在 `/outputs` 出现。
 8. **删除**：一律软删（`status=DELETED`），任务删除级联批次与用例。
 

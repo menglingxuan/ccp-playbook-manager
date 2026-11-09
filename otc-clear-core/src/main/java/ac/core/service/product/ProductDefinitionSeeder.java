@@ -37,7 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductDefinitionSeeder implements ApplicationRunner {
 
     static final String MARKER_KEY = "product.seed.version";
-    static final String MARKER_VALUE = "5";
+    static final String MARKER_VALUE = "6";
 
     /** Role code of a business column; derived products keep them required. */
     static final String BUSINESS_ROLE = "BUSINESS";
@@ -54,6 +54,13 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
     private static final List<SeedField> SYSTEM_MANAGED_FIELDS = List.of(
             SeedField.managed("testCaseId", "_TestCaseId"),
             SeedField.managed("remarks", "_Remarks"));
+
+    /**
+     * Reporting timestamp of the MW/IRS template. It is a business column and the first one inside
+     * the trade block, so the columns that follow keep their relative order.
+     */
+    private static final SeedField REPORT_TIMESTAMP_FIELD =
+            SeedField.trade("reportTimestamp", "Report Timestamp", "TEXT", true);
 
     private static boolean isBusinessRole(String roleCode) {
         return BUSINESS_ROLE.equalsIgnoreCase(roleCode == null ? "" : roleCode);
@@ -135,6 +142,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
     private static final List<SeedField> IRS_FIELDS = List.of(
             SeedField.managed("testCaseId", "_TestCaseId"),
             SeedField.managed("remarks", "_Remarks"),
+            REPORT_TIMESTAMP_FIELD,
             SeedField.keyField(),
             SeedField.date("tradeDate", "Trade Date", true),
             SeedField.date("effectiveDate", "Effective Date", false),
@@ -290,8 +298,83 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
             replaceCcsirsFields(tenantId);
         }
         ensureSystemManagedFields(tenantId);
+        ensureReportTimestampField(tenantId);
         applyColumnMatchingRules(tenantId);
         log.info("Upgraded product definitions of tenant {} from seed version {}", tenantId, fromVersion);
+    }
+
+    /**
+     * Adds the reporting timestamp to the MW/IRS template of an existing catalogue. The column is the
+     * first business column, so every field from that position on moves one place to the right.
+     */
+    private void ensureReportTimestampField(String tenantId) {
+        baseRepository.findByCode(tenantId, PlatformCode.MW.name(), BaseProductCode.IRS.name())
+                .ifPresent(base -> {
+                    List<BaseFieldRow> existing = baseRepository.listFields(tenantId, base.id());
+                    if (hasHeader(existing.stream().map(BaseFieldRow::header).toList(),
+                            REPORT_TIMESTAMP_FIELD.header())) {
+                        return;
+                    }
+                    LocalDateTime now = time.nowUtc();
+                    int position = leadingManagedCount(existing) + 1;
+                    for (BaseFieldRow field : existing) {
+                        if (field.sortOrder() >= position) {
+                            baseRepository.updateFieldOrder(field.id(), field.sortOrder() + 1, now);
+                        }
+                    }
+                    BaseFieldRow inserted = writeSingleField(tenantId, base.id(), REPORT_TIMESTAMP_FIELD,
+                            position);
+                    ProductSchema schema = schemaMapper.toBaseSchema(base,
+                            baseRepository.listFields(tenantId, base.id()), metaLookup.load(tenantId));
+                    baseRepository.updateSchemaHash(base.id(), schema.schemaHash(), now);
+                    for (ProductRow product : productRepository.listByBaseProduct(tenantId, base.id())) {
+                        List<ProductFieldRow> fields = productRepository.listFields(tenantId, product.id());
+                        if (hasHeader(fields.stream().map(ProductFieldRow::header).toList(),
+                                REPORT_TIMESTAMP_FIELD.header())) {
+                            continue;
+                        }
+                        for (ProductFieldRow field : fields) {
+                            if (field.sortOrder() >= position) {
+                                productRepository.updateFieldOrder(field.id(), field.sortOrder() + 1, now);
+                            }
+                        }
+                        insertProductField(tenantId, product.id(), inserted, position);
+                        refreshSchemaHash(tenantId, product);
+                    }
+                    log.info("Added the {} column to {}/{}", REPORT_TIMESTAMP_FIELD.header(),
+                            PlatformCode.MW, base.code());
+                });
+    }
+
+    /** Number of managed columns declared before the first business column. */
+    private static int leadingManagedCount(List<BaseFieldRow> fields) {
+        int count = 0;
+        for (BaseFieldRow field : fields) {
+            if (!isManagedRole(field.roleCode())) {
+                break;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    /** Writes one seed field of a base product at the given position. */
+    private BaseFieldRow writeSingleField(String tenantId, String baseProductId, SeedField field, int order) {
+        BaseFieldRow row = new BaseFieldRow(Ids.newId(), tenantId, baseProductId, field.key(), field.header(),
+                field.header(), field.aliases(), field.valueTypeCode(), field.roleCode(), field.tags(),
+                field.required(), true, field.keyFlag(), order, null, "", "");
+        baseRepository.insertField(row);
+        return row;
+    }
+
+    /** Copies one base field into a derived product; business columns stay required there. */
+    private void insertProductField(String tenantId, String productId, BaseFieldRow baseField, int order) {
+        productRepository.insertField(new ProductFieldRow(Ids.newId(), tenantId, productId, baseField.id(),
+                baseField.fieldKey(), baseField.header(), baseField.displayName(), baseField.aliases(),
+                baseField.valueTypeCode(), baseField.roleCode(), baseField.tags(),
+                isBusinessRole(baseField.roleCode()) || baseField.required(), baseField.businessKey(),
+                baseField.keyFlag(), order, baseField.remark(), baseField.formatHint(),
+                baseField.clonePattern()), time.nowUtc());
     }
 
     /**

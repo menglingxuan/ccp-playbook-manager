@@ -91,9 +91,10 @@
 其余列为未映射列；此时产品字段列名重复会使产品定义无效（`definitionValid=false`），预览与导入返回
 `409 PRODUCT_DEFINITION_INVALID`。文件侧重复列名只给 `DUPLICATE_SOURCE_HEADER` 警告，仅首个同名列参与映射。
 
-出厂种子：`MW / IRS` 26 个字段（`_TestCaseId`、`_Remarks` + 24 业务字段）、`MW / OIS` 22 个字段
-（`_TestCaseId`、`_Remarks` + 20 业务字段）、`MW / CCSIRS` 70 个字段（4 个 `MANAGED` 字段
+出厂种子：`MW / IRS` 27 个字段（`_TestCaseId`、`_Remarks` + 25 业务字段，交易块首列为必填的 `Report Timestamp`）、
+`MW / OIS` 22 个字段（`_TestCaseId`、`_Remarks` + 20 业务字段）、`MW / CCSIRS` 70 个字段（4 个 `MANAGED` 字段
 `_TestCaseId`、`_Remarks`、`Scenario Group`、`Priority` + 66 个业务字段，其中前 50 个为必填）。
+种子版本升到 `6`：已有库启动时会自动把 `Report Timestamp` 补到 `MW/IRS` 基产品与其派生产品的第 3 位。
 
 ## 字段元信息
 

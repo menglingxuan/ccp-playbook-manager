@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Locale;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
@@ -55,10 +56,10 @@ public final class SampleWorkbookGenerator {
 
     /** IRS sample: two managed columns, the complete 24 business columns and one unmapped column. */
     private static final String IRS_CSV = """
-            _TestCaseId,_Remarks,Trade ID,Trade Date,Effective Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Fixed Frequency,Floating Frequency,Day Count,BDC,Calendar,Clearing House,Clearing Member,Account,Counterparty,Direction,UPI,Reporting Party,Trade State,Novation Date,Portfolio,US Person,Extra Ref
-            TC-IRS-0001,imported from csv,IRS-1001,2026-01-05,2026-01-07,2031-01-05,"1,500,000.00",USD,0.0325,0.0425,ANNUAL,SEMI,ACT/360,MODIFIED FOLLOWING,TARGET,HKEX OTC CLEAR,CM-001,ACC-10001,CP-001,BUY,UPI-1001,PARTY-A,CLEARED,2026-01-12,PF-01,N,REF-A
-            TC-IRS-0002,imported from csv,IRS-1002,2026-02-10,2026-02-12,2031-02-10,2000000,EUR,0.0250,0.0350,ANNUAL,QUARTERLY,ACT/360,MODIFIED FOLLOWING,TARGET,HKEX OTC CLEAR,CM-002,ACC-10002,CP-002,SELL,UPI-1002,PARTY-B,CLEARED,2026-02-17,PF-02,Y,REF-B
-            TC-IRS-0003,imported from csv,IRS-1003,2026-03-15,2026-03-17,2031-03-15,750000,GBP,0.0180,0.0280,SEMI,SEMI,ACT/365,MODIFIED FOLLOWING,LONDON,HKEX OTC CLEAR,CM-003,ACC-10003,CP-003,BUY,UPI-1003,PARTY-A,CLEARED,2026-03-20,PF-03,N,REF-C
+            _TestCaseId,_Remarks,Report Timestamp,Trade ID,Trade Date,Effective Date,Maturity Date,Notional,Notional Currency,Rate,Rate,Fixed Frequency,Floating Frequency,Day Count,BDC,Calendar,Clearing House,Clearing Member,Account,Counterparty,Direction,UPI,Reporting Party,Trade State,Novation Date,Portfolio,US Person,Extra Ref
+            TC-IRS-0001,imported from csv,2026-11-09T20:34:00.970,IRS-1001,2026-01-05,2026-01-07,2031-01-05,"1,500,000.00",USD,0.0325,0.0425,ANNUAL,SEMI,ACT/360,MODIFIED FOLLOWING,TARGET,HKEX OTC CLEAR,CM-001,ACC-10001,CP-001,BUY,UPI-1001,PARTY-A,CLEARED,2026-01-12,PF-01,N,REF-A
+            TC-IRS-0002,imported from csv,2026-11-09T20:35:00.12,IRS-1002,2026-02-10,2026-02-12,2031-02-10,2000000,EUR,0.0250,0.0350,ANNUAL,QUARTERLY,ACT/360,MODIFIED FOLLOWING,TARGET,HKEX OTC CLEAR,CM-002,ACC-10002,CP-002,SELL,UPI-1002,PARTY-B,CLEARED,2026-02-17,PF-02,Y,REF-B
+            TC-IRS-0003,imported from csv,2026-11-09T20:36:00.45,IRS-1003,2026-03-15,2026-03-17,2031-03-15,750000,GBP,0.0180,0.0280,SEMI,SEMI,ACT/365,MODIFIED FOLLOWING,LONDON,HKEX OTC CLEAR,CM-003,ACC-10003,CP-003,BUY,UPI-1003,PARTY-A,CLEARED,2026-03-20,PF-03,N,REF-C
             """;
 
     /** OIS sample: no managed column, the complete 20 business columns. */
@@ -70,6 +71,12 @@ public final class SampleWorkbookGenerator {
 
     /** Management columns placed left of the IRS trade block. */
     private static final String[] WIDE_LEFT_MANAGED = {"_TestCaseId", "_Remarks", "Scenario Group", "Priority"};
+
+    /** Sheet that mirrors the whole MW/IRS definition, trade block included. */
+    public static final String STANDARD_SHEET_NAME = "IRS.Standard";
+
+    /** First business column of the MW/IRS template; it opens the trade block. */
+    public static final String REPORT_TIMESTAMP_HEADER = "Report Timestamp";
 
     /** IRS trade columns in schema order; "Rate" appears twice on purpose. */
     private static final String[] WIDE_TRADE_HEADERS = {
@@ -130,8 +137,11 @@ public final class SampleWorkbookGenerator {
             CreationHelper helper = workbook.getCreationHelper();
             CellStyle dateStyle = workbook.createCellStyle();
             dateStyle.setDataFormat(helper.createDataFormat().getFormat("yyyy-mm-dd"));
+            CellStyle dateTimeStyle = workbook.createCellStyle();
+            dateTimeStyle.setDataFormat(helper.createDataFormat().getFormat("yyyy-mm-dd hh:mm:ss.000"));
 
             writeNotesSheet(workbook);
+            writeIrsStandardSheet(workbook, dateStyle, dateTimeStyle);
             writeIrsSheet(workbook, dateStyle);
             writeOisSheet(workbook, dateStyle);
             writeWideSheet(workbook, dateStyle);
@@ -141,8 +151,58 @@ public final class SampleWorkbookGenerator {
         }
     }
 
-    private static void writeNotesSheet(Workbook workbook) {
-        Sheet notes = workbook.createSheet("说明");
+    /**
+     * Writes the standard IRS sheet: the two system managed columns, the required Report Timestamp,
+     * the complete IRS trade block in schema order, then one unmapped column.
+     */
+    private static void writeIrsStandardSheet(Workbook workbook, CellStyle dateStyle,
+            CellStyle dateTimeStyle) {
+        Sheet sheet = workbook.createSheet(STANDARD_SHEET_NAME);
+        Row header = sheet.createRow(0);
+        int column = 0;
+        header.createCell(column++).setCellValue("_TestCaseId");
+        header.createCell(column++).setCellValue("_Remarks");
+        header.createCell(column++).setCellValue(REPORT_TIMESTAMP_HEADER);
+        for (String name : WIDE_TRADE_HEADERS) {
+            header.createCell(column++).setCellValue(name);
+        }
+        header.createCell(column).setCellValue("Extra Ref");
+
+        String[][] rows = {
+                {"TC-IRS-0001", "standard row 1", "2026-11-09T20:34:00.970", "IRS-1001", "2026-01-05",
+                        "2026-01-07", "2031-01-05", "1500000", "USD", "0.0325", "0.0425", "ANNUAL", "SEMI",
+                        "ACT/360", "MODIFIED FOLLOWING", "TARGET", "HKEX OTC CLEAR", "CM-001", "ACC-10001",
+                        "CP-001", "BUY", "UPI-1001", "PARTY-A", "CLEARED", "2026-01-12", "PF-01", "N",
+                        "REF-A"},
+                {"TC-IRS-0002", "standard row 2", "2026-11-09T20:35:00.120", "IRS-1002", "2026-02-10",
+                        "2026-02-12", "2031-02-10", "2000000", "EUR", "0.0250", "0.0350", "ANNUAL",
+                        "QUARTERLY", "ACT/360", "MODIFIED FOLLOWING", "TARGET", "HKEX OTC CLEAR", "CM-002",
+                        "ACC-10002", "CP-002", "SELL", "UPI-1002", "PARTY-B", "CLEARED", "2026-02-17",
+                        "PF-02", "Y", "REF-B"},
+                {"TC-IRS-0003", "standard row 3", "2026-11-09T20:36:00.450", "IRS-1003", "2026-03-15",
+                        "2026-03-17", "2031-03-15", "750000", "GBP", "0.0180", "0.0280", "SEMI", "SEMI",
+                        "ACT/365", "MODIFIED FOLLOWING", "LONDON", "HKEX OTC CLEAR", "CM-003", "ACC-10003",
+                        "CP-003", "BUY", "UPI-1003", "PARTY-A", "CLEARED", "2026-03-20", "PF-03", "N",
+                        "REF-C"}};
+
+        for (int index = 0; index < rows.length; index++) {
+            Row row = sheet.createRow(index + 1);
+            String[] values = rows[index];
+            for (int cell = 0; cell < values.length; cell++) {
+                if (cell == 2) {
+                    setDateTime(row.createCell(cell), LocalDateTime.parse(values[cell]), dateTimeStyle);
+                } else if (cell == 4 || cell == 5 || cell == 6 || cell == 24) {
+                    setDate(row.createCell(cell), LocalDate.parse(values[cell]), dateStyle);
+                } else if (cell == 7 || cell == 9 || cell == 10) {
+                    row.createCell(cell).setCellValue(Double.parseDouble(values[cell]));
+                } else {
+                    row.createCell(cell).setCellValue(values[cell]);
+                }
+            }
+        }
+    }
+
+    private static void writeNotesSheet(Workbook workbook) {        Sheet notes = workbook.createSheet("说明");
         notes.createRow(0).createCell(0).setCellValue("OTC Clear 测试数据样例");
         notes.createRow(1).createCell(0).setCellValue("IRS sheet 的表头在第 3 行，交易字段从第 3 列开始。");
         notes.createRow(2).createCell(0).setCellValue("Notional 为公式列，导入时保留公式文本与缓存值。");
@@ -454,5 +514,10 @@ public final class SampleWorkbookGenerator {
     private static void setDate(Cell cell, LocalDate value, CellStyle dateStyle) {
         cell.setCellValue(value);
         cell.setCellStyle(dateStyle);
+    }
+
+    private static void setDateTime(Cell cell, LocalDateTime value, CellStyle dateTimeStyle) {
+        cell.setCellValue(value);
+        cell.setCellStyle(dateTimeStyle);
     }
 }
