@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('审计日志')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: topbar('audit')}"></header>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title">审计日志</h2>
+      <div class="page-sub">按功能模块、审计对象与动作分类查看变更记录；当前仅记录「产品定义」与「字段元信息」的改动</div>
+    </div>
+    <div class="page-head-actions">
+      <span class="chip muted" id="auditTotal"></span>
+      <button class="icon-btn" id="auditReload" title="重新加载" aria-label="重新加载">
+        <span aria-hidden="true">↻</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <select id="auditModule" aria-label="功能模块">
+      <option value="">全部模块</option>
+    </select>
+    <select id="auditEntity" aria-label="审计对象">
+      <option value="">全部对象</option>
+    </select>
+    <select id="auditAction" aria-label="动作">
+      <option value="">全部动作</option>
+    </select>
+    <input type="search" id="auditSearch" placeholder="搜索对象 ID / 动作 / 详情">
+    <label class="toolbar-date">日期
+      <input type="date" id="auditFrom" aria-label="起始日期">
+      <span class="muted">–</span>
+      <input type="date" id="auditTo" aria-label="结束日期">
+    </label>
+    <button class="tool-btn" id="auditReset">重置筛选</button>
+  </div>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table id="auditTable">
+        <thead>
+        <tr>
+          <th>时间</th>
+          <th>功能模块</th>
+          <th>审计对象</th>
+          <th>动作</th>
+          <th>对象 ID</th>
+          <th data-no-resize="true">详情</th>
+        </tr>
+        </thead>
+        <tbody id="auditRows"></tbody>
+      </table>
+    </div>
+    <div class="panel-body">
+      <div class="pagination" id="auditPager"></div>
+    </div>
+  </section>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('audit')}"></th:block>
+</body>
+</html>

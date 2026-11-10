@@ -20,6 +20,8 @@ public class AppProperties {
     private Limits limits = new Limits();
     private Ids ids = new Ids();
     private Export export = new Export();
+    private Audit audit = new Audit();
+    private Resources resources = new Resources();
 
     /** Reserved word friendly accessor for {@code app.import.*}. */
     @Setter(AccessLevel.NONE)
@@ -75,6 +77,22 @@ public class AppProperties {
         WARN,
         ERROR,
         IGNORE
+    }
+
+    /** Audit trail settings; the prod profile turns the whole trail off by default. */
+    @Getter
+    @Setter
+    public static class Audit {
+        private boolean enabled = true;
+        private int pageSize = 25;
+    }
+
+    /** Resource statistics switches; the prod profile hides host level figures by default. */
+    @Getter
+    @Setter
+    public static class Resources {
+        private boolean heapMetricsEnabled = true;
+        private boolean diskMetricsEnabled = true;
     }
 
     @Getter

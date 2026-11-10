@@ -9,7 +9,7 @@
 </head>
 <body>
 
-<header th:fragment="topbar" class="topbar">
+<header th:fragment="topbar(active)" class="topbar">
   <div class="topbar-inner">
     <div class="topbar-left">
       <div class="topbar-title" th:text="#{app.title}">OTC Clear 测试数据管理平台</div>
@@ -37,26 +37,31 @@
       </select>
     </div>
   </div>
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a class="nav-link" th:classappend="${active == 'tasks' ? 'active' : ''}" th:href="@{/}"
+         th:text="#{nav.tasks}">任务面板</a>
+      <a class="nav-link" th:classappend="${active == 'import' ? 'active' : ''}" th:href="@{/import}"
+         th:text="#{nav.import}">导入向导</a>
+      <a class="nav-link" th:classappend="${active == 'batches' ? 'active' : ''}" th:href="@{/batches}"
+         th:text="#{nav.batches}">批次浏览</a>
+      <a class="nav-link" th:classappend="${active == 'exports' ? 'active' : ''}" th:href="@{/exports}"
+         th:text="#{nav.exports}">导出管理</a>
+      <a class="nav-link" th:classappend="${active == 'outputs' ? 'active' : ''}" th:href="@{/outputs}"
+         th:text="#{nav.outputs}">外部任务</a>
+      <a class="nav-link" th:classappend="${active == 'products' ? 'active' : ''}" th:href="@{/products}"
+         th:text="#{nav.products}">产品定义</a>
+      <a class="nav-link" th:classappend="${active == 'meta' ? 'active' : ''}" th:href="@{/meta}"
+         th:text="#{nav.meta}">字段元信息</a>
+      <a class="nav-link" th:classappend="${active == 'resources' ? 'active' : ''}" th:href="@{/resources}"
+         th:text="#{nav.resources}">资源统计</a>
+      <a class="nav-link" th:if="${auditEnabled}" th:classappend="${active == 'audit' ? 'active' : ''}"
+         th:href="@{/audit}" th:text="#{nav.audit}">审计日志</a>
+      <a class="nav-link" th:classappend="${active == 'about' ? 'active' : ''}" th:href="@{/about}"
+         th:text="#{nav.about}">关于</a>
+    </div>
+  </nav>
 </header>
-
-<nav th:fragment="nav(active)" class="nav">
-  <div class="nav-inner">
-    <a class="nav-link" th:classappend="${active == 'tasks' ? 'active' : ''}" th:href="@{/}"
-       th:text="#{nav.tasks}">任务面板</a>
-    <a class="nav-link" th:classappend="${active == 'import' ? 'active' : ''}" th:href="@{/import}"
-       th:text="#{nav.import}">导入向导</a>
-    <a class="nav-link" th:classappend="${active == 'batches' ? 'active' : ''}" th:href="@{/batches}"
-       th:text="#{nav.batches}">批次列表</a>
-    <a class="nav-link" th:classappend="${active == 'outputs' ? 'active' : ''}" th:href="@{/outputs}"
-       th:text="#{nav.outputs}">产出浏览</a>
-    <a class="nav-link" th:classappend="${active == 'products' ? 'active' : ''}" th:href="@{/products}"
-       th:text="#{nav.products}">产品定义</a>
-    <a class="nav-link" th:classappend="${active == 'meta' ? 'active' : ''}" th:href="@{/meta}"
-       th:text="#{nav.meta}">字段元信息</a>
-    <a class="nav-link" th:classappend="${active == 'about' ? 'active' : ''}" th:href="@{/about}"
-       th:text="#{nav.about}">关于</a>
-  </div>
-</nav>
 
 <div th:fragment="toast" class="toast-host" id="toastHost"></div>
 

@@ -238,10 +238,11 @@ function openExportPanel() {
         <label class="muted" style="display:flex;gap:6px;align-items:center;font-size:12px" title="用导入时保存的工作簿基线重算公式，导出重算后的值"><input type="checkbox" id="expRecalc" checked> 导出前重算公式</label>
       </div>
     </div>
-    <div class="muted" style="font-size:12px;margin-bottom:6px">范围：${ids.length ? `选中 ${ids.length} 条用例` : '整个批次'}</div>
+    <div class="muted" style="font-size:12px;margin-bottom:6px">范围：${ids.length ? `选中 ${ids.length} 条用例` : '整个批次'} ·
+      导出会保存为记录（可在「导出管理」随时下载或删除），不会自动下载文件</div>
     <div id="expPrecheckBox"></div>`,
   `<button class="tool-btn" id="expPrecheckBtn">预检</button>
-   <button class="tool-btn primary" id="expRunBtn" disabled>导出并下载</button>`);
+   <button class="tool-btn primary" id="expRunBtn" disabled>导出并保存</button>`);
 
   const request = () => ({
     ...scope,
@@ -271,17 +272,36 @@ function openExportPanel() {
     try {
       const result = await post('/api/exports', request());
       const warnings = result.warnings || [];
+      const summary = `已保存导出记录：${result.rowCount} 行 · ${result.fileName}`;
       if (warnings.length) {
-        ui.toast(`已导出 ${result.rowCount} 行，${warnings.length} 条重算提示`, 'warn');
+        ui.toast(`${summary}，${warnings.length} 条重算提示`, 'warn');
       } else {
-        ui.toast(`已导出 ${result.rowCount} 行`, 'ok');
+        ui.toast(summary, 'ok');
       }
-      window.location.href = `/api/exports/${encodeURIComponent(result.exportId)}/download`;
-      modal.close();
+      showExportSaved(modal, result);
     } catch (error) {
       ui.showError(error);
     }
   });
+}
+
+/** Confirms the stored record and offers the two follow up actions. */
+function showExportSaved(modal, result) {
+  const box = modal.root.querySelector('#expPrecheckBox');
+  if (!box) {
+    modal.close();
+    return;
+  }
+  box.innerHTML = `
+    <div class="export-saved">
+      <div class="export-saved-title">已保存到导出管理</div>
+      <div class="export-saved-meta mono">${ui.escapeHtml(result.fileName)} · ${result.rowCount} 行</div>
+      <div class="row-actions" style="margin-top:8px">
+        <a class="tool-btn small" href="/exports?focus=${encodeURIComponent(result.exportId)}">查看导出记录</a>
+        <a class="tool-btn small primary" href="/api/exports/${encodeURIComponent(result.exportId)}/download">立即下载</a>
+      </div>
+    </div>`;
+  modal.root.querySelector('#expRunBtn').disabled = true;
 }
 
 async function deleteBatch() {

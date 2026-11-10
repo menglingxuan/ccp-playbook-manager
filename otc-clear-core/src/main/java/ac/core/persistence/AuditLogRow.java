@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 public record AuditLogRow(
         String id,
         String tenantId,
+        String module,
         String entityType,
         String entityId,
         String action,

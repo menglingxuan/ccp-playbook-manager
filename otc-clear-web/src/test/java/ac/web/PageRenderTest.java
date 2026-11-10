@@ -9,11 +9,19 @@ class PageRenderTest extends AbstractIntegrationTest {
 
     @Test
     void pagesRender() {
-        String[] paths = {"/", "/import", "/batches", "/products", "/meta", "/about", "/outputs"};
+        String[] paths = {"/", "/import", "/batches", "/products", "/meta", "/about", "/outputs",
+                "/resources", "/audit"};
         for (String path : paths) {
             var response = api.get(path);
             assertThat(response.status()).as(path + " -> " + response.body()).isEqualTo(200);
             assertThat(response.body()).contains("OTC Clear 测试数据管理平台");
+        }
+    }
+
+    @Test
+    void auditLinkIsRenderedOnEveryPage() {
+        for (String path : new String[] {"/", "/meta", "/resources", "/about", "/audit"}) {
+            assertThat(api.get(path).body()).as(path).contains("href=\"/audit\"");
         }
     }
 

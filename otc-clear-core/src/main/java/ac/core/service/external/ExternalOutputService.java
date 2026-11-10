@@ -7,7 +7,6 @@ import ac.core.persistence.ExternalOutputRepository;
 import ac.core.persistence.ExternalOutputRow;
 import ac.core.persistence.ImportBatchRepository;
 import ac.core.persistence.TestCaseRepository;
-import ac.core.service.audit.AuditService;
 import ac.core.service.batch.BatchService;
 import ac.core.service.cases.CaseService;
 import ac.core.service.cases.CaseSummary;
@@ -24,17 +23,15 @@ public class ExternalOutputService {
     private final TestCaseRepository caseRepository;
     private final CaseService caseService;
     private final BatchService batchService;
-    private final AuditService audit;
 
     public ExternalOutputService(ExternalOutputRepository outputRepository,
             ImportBatchRepository batchRepository, TestCaseRepository caseRepository, CaseService caseService,
-            BatchService batchService, AuditService audit) {
+            BatchService batchService) {
         this.outputRepository = outputRepository;
         this.batchRepository = batchRepository;
         this.caseRepository = caseRepository;
         this.caseService = caseService;
         this.batchService = batchService;
-        this.audit = audit;
     }
 
     public PageResult<ExternalOutputRow> page(String tenantId, String jobId, PageQuery page) {
@@ -68,7 +65,6 @@ public class ExternalOutputService {
                     batchService.delete(tenantId, batch.id()));
         }
         outputRepository.delete(tenantId, outputId);
-        audit.record(tenantId, AuditService.ENTITY_OUTPUT, outputId, "DELETE", java.util.Map.of());
     }
 
     public int caseCount(String tenantId, String batchId) {

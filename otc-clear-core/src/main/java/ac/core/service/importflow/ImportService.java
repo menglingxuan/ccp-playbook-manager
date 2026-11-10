@@ -10,7 +10,6 @@ import ac.core.persistence.ImportTaskRepository;
 import ac.core.persistence.ImportTaskRow;
 import ac.core.persistence.TestCaseRecord;
 import ac.core.persistence.TestCaseRepository;
-import ac.core.service.audit.AuditService;
 import ac.core.service.baseline.BaselineStore;
 import ac.core.service.cases.CaseJsonCodec;
 import ac.core.service.product.ProductCatalog;
@@ -80,7 +79,6 @@ public class ImportService {
     private final ImportBatchRepository batchRepository;
     private final TestCaseRepository caseRepository;
     private final CaseJsonCodec codec;
-    private final AuditService audit;
     private final JsonSupport json;
     private final TimeProvider time;
     private final AppProperties properties;
@@ -88,8 +86,7 @@ public class ImportService {
 
     public ImportService(UploadStore uploadStore, PreviewService previewService, SheetCache sheetCache,
             ProductCatalog products, ImportTaskRepository taskRepository,
-            ImportBatchRepository batchRepository, TestCaseRepository caseRepository, CaseJsonCodec codec,
-            AuditService audit, JsonSupport json, TimeProvider time, AppProperties properties,
+            ImportBatchRepository batchRepository, TestCaseRepository caseRepository, CaseJsonCodec codec, JsonSupport json, TimeProvider time, AppProperties properties,
             BaselineStore baselineStore) {
         this.uploadStore = uploadStore;
         this.previewService = previewService;
@@ -99,7 +96,6 @@ public class ImportService {
         this.batchRepository = batchRepository;
         this.caseRepository = caseRepository;
         this.codec = codec;
-        this.audit = audit;
         this.json = json;
         this.time = time;
         this.properties = properties;
@@ -164,7 +160,7 @@ public class ImportService {
                         null, schema.code(), upload.fileName(), upload.sha256(), upload.sourceType(),
                         table.sheetName(), layout.headerRow(), layout.tradeStartColumn(),
                         layout.tradeEndColumn(), layoutJson(layout), mappingJson(layout), schema.schemaHash(),
-                        "ACTIVE", rows.size(), invalid, null, "system", now, now,
+                        "ACTIVE", rows.size(), invalid, null, false, false, null, "system", now, now,
                         null));
                 keepBaseline(tenantId, batchId, upload, issues);
 
@@ -202,7 +198,6 @@ public class ImportService {
         auditDetail.put("batches", batches.size());
         auditDetail.put("rows", totalValid);
         auditDetail.put("invalidRows", totalInvalid);
-        audit.record(tenantId, AuditService.ENTITY_TASK, taskId, "IMPORT", auditDetail);
 
         return new ImportResult(taskId, status, totalValid, totalInvalid, batches.size(),
                 batches, capped);

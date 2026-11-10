@@ -15,8 +15,8 @@ public class ImportBatchRepository {
     private static final String COLUMNS = """
             id, tenant_id, task_id, upload_id, kind, parent_batch_id, product_code, source_filename,
             source_sha256, source_type, sheet_name, header_row_index, trade_start_col, trade_end_col,
-            layout_json, column_mapping, schema_hash, status, total_rows, invalid_rows, note, created_by,
-            created_at, updated_at, deleted_at
+            layout_json, column_mapping, schema_hash, status, total_rows, invalid_rows, note, favorite,
+            pinned, tags, created_by, created_at, updated_at, deleted_at
             """;
 
     private final JdbcClient jdbc;
@@ -30,13 +30,13 @@ public class ImportBatchRepository {
                         INSERT INTO import_batch (id, tenant_id, task_id, upload_id, kind, parent_batch_id,
                             product_code, source_filename, source_sha256, source_type, sheet_name,
                             header_row_index, trade_start_col, trade_end_col, layout_json, column_mapping,
-                            schema_hash, status, total_rows, invalid_rows, note, created_by, created_at,
-                            updated_at, deleted_at)
+                            schema_hash, status, total_rows, invalid_rows, note, favorite, pinned, tags,
+                            created_by, created_at, updated_at, deleted_at)
                         VALUES (:id, :tenantId, :taskId, :uploadId, :kind, :parentBatchId,
                             :productCode, :sourceFilename, :sourceSha256, :sourceType, :sheetName,
                             :headerRowIndex, :tradeStartCol, :tradeEndCol, :layoutJson, :columnMapping,
-                            :schemaHash, :status, :totalRows, :invalidRows, :note, :createdBy, :createdAt,
-                            :updatedAt, :deletedAt)
+                            :schemaHash, :status, :totalRows, :invalidRows, :note, :favorite, :pinned, :tags,
+                            :createdBy, :createdAt, :updatedAt, :deletedAt)
                         """)
                 .param("id", row.id())
                 .param("tenantId", row.tenantId())
@@ -59,6 +59,9 @@ public class ImportBatchRepository {
                 .param("totalRows", row.totalRows())
                 .param("invalidRows", row.invalidRows())
                 .param("note", row.note())
+                .param("favorite", row.favorite())
+                .param("pinned", row.pinned())
+                .param("tags", row.tags())
                 .param("createdBy", row.createdBy())
                 .param("createdAt", row.createdAt())
                 .param("updatedAt", row.updatedAt())
@@ -95,54 +98,147 @@ public class ImportBatchRepository {
     }
 
     public List<ImportBatchRow> search(String tenantId, BatchFilter filter) {
-        StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM import_batch b WHERE b.tenant_id = :tenantId");
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("tenantId", tenantId);
-        sql.append(" AND b.status <> 'DELETED'");
-        if (!filter.includeExternal()) {
-            sql.append(" AND b.kind <> 'EXTERNAL_OUTPUT'");
-        }
-        if (filter.product() != null && !filter.product().isBlank()) {
-            sql.append(" AND b.product_code = :product");
-            params.put("product", filter.product().toUpperCase(java.util.Locale.ROOT));
-        }
-        if (filter.kind() != null && !filter.kind().isBlank()) {
-            sql.append(" AND b.kind = :kind");
-            params.put("kind", filter.kind());
-        }
-        if (filter.query() != null && !filter.query().isBlank()) {
-            sql.append(" AND (LOWER(b.source_filename) LIKE :query OR LOWER(b.sheet_name) LIKE :query"
-                    + " OR LOWER(b.note) LIKE :query)");
-            params.put("query", "%" + filter.query().trim().toLowerCase(java.util.Locale.ROOT) + "%");
-        }
-        sql.append(" ORDER BY b.created_at DESC LIMIT :limit OFFSET :offset");
+        String where = whereClause(tenantId, filter, params, null);
         params.put("limit", filter.page().size());
         params.put("offset", filter.page().offset());
-        return jdbc.sql(sql.toString()).params(params).query(this::map).list();
+        return jdbc.sql("SELECT " + COLUMNS + " FROM import_batch b " + where + orderBy(filter.sort())
+                + " LIMIT :limit OFFSET :offset")
+                .params(params).query(this::map).list();
     }
 
     public long count(String tenantId, BatchFilter filter) {
-        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM import_batch b WHERE b.tenant_id = :tenantId");
+        Map<String, Object> params = new LinkedHashMap<>();
+        String where = whereClause(tenantId, filter, params, null);
+        return jdbc.sql("SELECT COUNT(*) FROM import_batch b " + where).params(params)
+                .query(Long.class).single();
+    }
+
+    /** Batches of the dock: pinned ones first, then the most recent ones. */
+    public List<ImportBatchRow> dock(String tenantId, int limit, boolean includeDeleted) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("tenantId", tenantId);
-        sql.append(" AND b.status <> 'DELETED'");
-        if (!filter.includeExternal()) {
+        params.put("limit", limit);
+        StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM import_batch b WHERE b.tenant_id = :tenantId");
+        if (!includeDeleted) {
+            sql.append(" AND b.status <> 'DELETED'");
+        }
+        sql.append(" AND b.kind <> 'EXTERNAL_OUTPUT' ORDER BY b.pinned DESC, b.created_at DESC LIMIT :limit");
+        return jdbc.sql(sql.toString()).params(params).query(this::map).list();
+    }
+
+    /** Total number of batches per facet value under the current filter, used by the console chips. */
+    public Map<String, Long> countByColumn(String tenantId, BatchFilter filter, String column) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        // the facet is counted with every filter applied except its own dimension
+        String where = whereClause(tenantId, filter, params, column);
+        Map<String, Long> counts = new LinkedHashMap<>();
+        jdbc.sql("SELECT " + column + " AS k, COUNT(*) AS c FROM import_batch b " + where
+                        + " GROUP BY " + column + " ORDER BY c DESC")
+                .params(params)
+                .query(rs -> {
+                    String key = rs.getString("k");
+                    counts.put(key == null ? "" : key, rs.getLong("c"));
+                });
+        return counts;
+    }
+
+    /** Raw tag column of the filtered rows; tag counting happens in the service. */
+    public List<String> tagColumn(String tenantId, BatchFilter filter) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        String where = whereClause(tenantId, filter, params, "tags");
+        return jdbc.sql("SELECT b.tags FROM import_batch b " + where).params(params)
+                .query(String.class).list();
+    }
+
+    /**
+     * Builds the WHERE clause of the console query.
+     *
+     * @param skipColumn facet dimension to ignore, {@code null} to apply every filter
+     */
+    private String whereClause(String tenantId, BatchFilter filter, Map<String, Object> params,
+            String skipColumn) {
+        StringBuilder sql = new StringBuilder("WHERE b.tenant_id = :tenantId");
+        params.put("tenantId", tenantId);
+        boolean skipStatus = "status".equals(skipColumn);
+        if (!skipStatus) {
+            if (filter.status() != null && !filter.status().isBlank()) {
+                sql.append(" AND b.status = :status");
+                params.put("status", filter.status().trim().toUpperCase(java.util.Locale.ROOT));
+            } else if (!filter.includeDeleted()) {
+                sql.append(" AND b.status <> 'DELETED'");
+            }
+        }
+        if (!"kind".equals(skipColumn) && !filter.includeExternal()) {
             sql.append(" AND b.kind <> 'EXTERNAL_OUTPUT'");
         }
-        if (filter.product() != null && !filter.product().isBlank()) {
-            sql.append(" AND b.product_code = :product");
-            params.put("product", filter.product().toUpperCase(java.util.Locale.ROOT));
-        }
-        if (filter.kind() != null && !filter.kind().isBlank()) {
+        if (!"kind".equals(skipColumn) && filter.kind() != null && !filter.kind().isBlank()) {
             sql.append(" AND b.kind = :kind");
-            params.put("kind", filter.kind());
+            params.put("kind", filter.kind().trim().toUpperCase(java.util.Locale.ROOT));
+        }
+        if (!"product_code".equals(skipColumn) && filter.product() != null && !filter.product().isBlank()) {
+            sql.append(" AND b.product_code = :product");
+            params.put("product", filter.product().trim().toUpperCase(java.util.Locale.ROOT));
+        }
+        if (!"tags".equals(skipColumn) && filter.tag() != null && !filter.tag().isBlank()) {
+            sql.append(" AND LOWER(b.tags) LIKE :tag");
+            params.put("tag", "%," + filter.tag().trim().toLowerCase(java.util.Locale.ROOT) + ",%");
+        }
+        if (!"favorite".equals(skipColumn) && filter.favorite() != null) {
+            sql.append(" AND b.favorite = :favorite");
+            params.put("favorite", filter.favorite());
+        }
+        if (!"pinned".equals(skipColumn) && filter.pinned() != null) {
+            sql.append(" AND b.pinned = :pinned");
+            params.put("pinned", filter.pinned());
+        }
+        if (filter.from() != null) {
+            sql.append(" AND b.created_at >= :createdFrom");
+            params.put("createdFrom", utcStartOfDay(filter.from()));
+        }
+        if (filter.to() != null) {
+            sql.append(" AND b.created_at < :createdTo");
+            params.put("createdTo", utcStartOfDay(filter.to().plusDays(1)));
         }
         if (filter.query() != null && !filter.query().isBlank()) {
-            sql.append(" AND (LOWER(b.source_filename) LIKE :query OR LOWER(b.sheet_name) LIKE :query"
-                    + " OR LOWER(b.note) LIKE :query)");
+            sql.append(" AND (LOWER(b.source_filename) LIKE :query OR LOWER(b.sheet_name) LIKE :query")
+                    .append(" OR LOWER(b.note) LIKE :query OR LOWER(b.tags) LIKE :query")
+                    .append(" OR LOWER(b.product_code) LIKE :query OR LOWER(b.id) LIKE :query)");
             params.put("query", "%" + filter.query().trim().toLowerCase(java.util.Locale.ROOT) + "%");
         }
-        return jdbc.sql(sql.toString()).params(params).query(Long.class).single();
+        return sql.toString();
+    }
+
+    private static java.time.LocalDateTime utcStartOfDay(java.time.LocalDate date) {
+        return date.atStartOfDay(ac.core.common.TimeProvider.DISPLAY_ZONE)
+                .withZoneSameInstant(java.time.ZoneOffset.UTC).toLocalDateTime();
+    }
+
+    private String orderBy(String sort) {
+        String key = sort == null || sort.isBlank() ? "created" : sort.trim().toLowerCase(java.util.Locale.ROOT);
+        boolean ascending = key.endsWith("_asc");
+        String field = ascending ? key.substring(0, key.length() - 4)
+                : key.endsWith("_desc") ? key.substring(0, key.length() - 5) : key;
+        String direction = ascending ? " ASC" : " DESC";
+        return switch (field) {
+            case "name" -> " ORDER BY b.pinned DESC, LOWER(b.source_filename)" + direction + ", b.created_at DESC";
+            case "rows" -> " ORDER BY b.pinned DESC, b.total_rows" + direction + ", b.created_at DESC";
+            case "invalid" -> " ORDER BY b.pinned DESC, b.invalid_rows" + direction + ", b.created_at DESC";
+            case "product" -> " ORDER BY b.pinned DESC, LOWER(b.product_code)" + direction + ", b.created_at DESC";
+            default -> " ORDER BY b.pinned DESC, b.created_at" + direction + ", b.id";
+        };
+    }
+
+    /** Stores the console metadata of one batch. */
+    public void updateMeta(String tenantId, String id, String note, boolean favorite, boolean pinned,
+            String tags, LocalDateTime updatedAt) {
+        jdbc.sql("""
+                        UPDATE import_batch SET note = :note, favorite = :favorite, pinned = :pinned, tags = :tags,
+                            updated_at = :updatedAt
+                        WHERE tenant_id = :tenantId AND id = :id
+                        """)
+                .param("note", note).param("favorite", favorite).param("pinned", pinned).param("tags", tags)
+                .param("updatedAt", updatedAt).param("tenantId", tenantId).param("id", id).update();
     }
 
     /**
@@ -223,6 +319,9 @@ public class ImportBatchRepository {
                 rs.getInt("total_rows"),
                 rs.getInt("invalid_rows"),
                 rs.getString("note"),
+                rs.getBoolean("favorite"),
+                rs.getBoolean("pinned"),
+                rs.getString("tags"),
                 rs.getString("created_by"),
                 rs.getObject("created_at", LocalDateTime.class),
                 rs.getObject("updated_at", LocalDateTime.class),

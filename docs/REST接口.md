@@ -20,7 +20,7 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/context` | 模式、租户、数据目录、版本、限制、导出默认值、产品列表 |
+| GET | `/api/context` | 模式、租户、数据目录、版本、数据库产品与版本（`database`）、配置档（`profiles`）、审计开关（`auditEnabled`）、限制、导出默认值、产品列表 |
 | GET | `/api/products` | 运行时产品列表（含字段顺序与重名标记） |
 | GET | `/api/products/{code}` | 单个产品的运行时字段定义 |
 
@@ -175,23 +175,27 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/batches` | `product`、`q`（源文件 / Sheet / 备注）、`kind`、`includeExternal`、`page`、`size` |
+| GET | `/api/batches` | `product`、`q`（源文件 / Sheet / 备注 / 标签 / 产品 / 批次 ID）、`kind`、`status`、`tag`、`favorite`、`pinned`、`from` / `to`（创建日期，含首尾）、`sort=created\|name\|rows\|invalid\|product`（可加 `_asc` / `_desc`，缺省创建时间倒序）、`includeDeleted`、`includeExternal`、`page`、`size`；返回项含 `favorite`、`pinned`、`tags` |
+| GET | `/api/batches/facets` | 与列表同样的筛选参数；返回 `total` / `favorite` / `pinned` 与 `products` / `kinds` / `statuses` / `tags` 各维度计数（每个维度按其余筛选条件统计） |
+| GET | `/api/batches/dock` | `limit`（默认 12，≤30，置顶优先再按时间倒序）、`includeDeleted`，供控制台停靠栏使用 |
 | GET | `/api/batches/{id}` | 批次详情（含 `activeCases`） |
 | PATCH | `/api/batches/{id}` | `{note}` |
+| PATCH | `/api/batches/{id}/meta` | `{favorite?, pinned?, tags?, note?}`，缺省字段保持原值；标签去空白/去重、≤10 个且每个 ≤32 字符、不得含逗号，备注 ≤500 字符 |
 | DELETE | `/api/batches/{id}` | 软删批次与用例 |
-| GET | `/api/batches/{id}/cases` | `q`、`hasFormula`、`page`、`size` |
+| GET | `/api/batches/{id}/cases` | `q`、`hasFormula`、`sort=row\|testcase\|key\|formulas\|updated`（可加 `_asc` / `_desc`，缺省原始顺序升序）、`withSummary`（默认 true，返回 `summary.total` / `summary.withFormula`）、`page`、`size` |
 | GET | `/api/cases/{id}` | 用例详情（data/managed/formulas/extras/version） |
 | GET | `/api/cases/{id}/vertical` | 纵向视图（`identity` / `trade` / `managed` / `extras` 分组） |
 | PATCH | `/api/cases/{id}` | `{version, values, managed}`，版本不匹配返回 409 |
 | DELETE | `/api/cases/{id}` | 软删 |
 | POST | `/api/cases/bulk-delete` | `{ids:[...]}`，≤ 500 |
+| GET | `/api/search` | 全局搜索：`q`（自由文本 + 限定词，≥2 字符）、`limit`（每组上限，默认 20，≤50）；限定词 `tag:` `product:` `batch:` `case:` `value:`（别名 `field:`）`note:` `file:` `batchid:` `scope:batch\|case`；返回 `batches` / `cases` 两组命中及 `truncated`，批次级限定词同时收窄用例组 |
 
 ## 克隆
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/api/clones/preview` | `{caseIds, copies, template, note}` → 计划行与冲突 |
-| POST | `/api/clones` | 执行，返回 `{batchId, created}` |
+| POST | `/api/clones` | 执行，返回 `{batchId, created}`；克隆批次继承原批次的 `taskId`（同时记 `parentBatchId`），因此与原批次一起出现在任务的批次列表中，任务的 `batchCount` 相应 +1 |
 
 模板 token：`{base}` `{seq}` / `{seq:02}` `{uuid}` `{date:yyyyMMdd}` `{batch}`。
 
@@ -200,9 +204,10 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/api/exports/precheck` | 返回 `valid`、`rowCount`、`headers`、`sampleRow`、`issues` |
-| POST | `/api/exports` | 生成文件并记录 `export_job` |
-| GET | `/api/exports` | 导出历史 |
-| GET | `/api/exports/{id}/download` | 下载（`Content-Disposition` 带 UTF-8 文件名） |
+| POST | `/api/exports` | 生成 CSV 并**存档为记录**（返回 `exportId`、`fileName`、`rowCount`、`size`、`warnings`），前端不再自动下载 |
+| GET | `/api/exports` | 导出记录：`q`（文件名 / 产品 / 批次 ID / 导出 ID）、`product`、`batchId`、`from` / `to`、`sort=created\|rows\|size`（可加 `_asc` / `_desc`）、`page`、`size`；返回项含 `options`、`fileExists`、`downloadUrl` |
+| GET | `/api/exports/{id}/download` | 下载存档文件（`Content-Disposition` 带 UTF-8 文件名） |
+| DELETE | `/api/exports/{id}` | 删除导出记录并删除存档文件 |
 
 请求体：
 
@@ -243,7 +248,9 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/audit` | `entityType`、`action`、`page`、`size` |
+| GET | `/api/resources/stats` | 当前租户的资源统计：文件区域（文件数 / 占用 / 最近变更）、数据库产品与版本、各业务表行数、运行时（堆/非堆、线程、运行时长、处理器、系统负载）与磁盘空间 |
+| GET | `/api/audit` | 审计记录：`module`（`PRODUCT_DEFINITION` / `META_DICTIONARY`，历史记录还可能是 `TASK` / `BATCH` / `CASE` / `EXPORT` / `OUTPUT` / `EXTERNAL_JOB` / `OTHER`）、`entityType`、`action`、`q`、`from`、`to`、`page`、`size`；`app.audit.enabled=false` 时返回 404 |
+| GET | `/api/audit/facets` | 审计面板的维度计数：`modules` / `entities` / `actions` / `total`，每个维度忽略自身筛选；关闭审计时返回 404 |
 | GET | `/api/settings` | 租户导出默认值 |
 | PUT | `/api/settings` | 保存导出默认值 |
 | GET | `/api/i18n` | 当前语言的文案字典 `{locale, messages}` |
@@ -270,4 +277,6 @@
 | `/outputs`、`/outputs/{id}` | 产出浏览 / 详情 |
 | `/products` | 产品定义（平台 → 基产品 → 产品） |
 | `/meta` | 字段元信息 |
+| `/resources` | 资源统计 |
+| `/audit` | 审计日志（`app.audit.enabled=false` 时 404） |
 | `/about` | 关于 |

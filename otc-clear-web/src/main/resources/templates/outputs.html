@@ -1,15 +1,14 @@
 <!doctype html>
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/layout :: head('产出浏览')}"></head>
+<head th:replace="~{fragments/layout :: head('外部任务')}"></head>
 <body>
-<header th:replace="~{fragments/layout :: topbar}"></header>
-<nav th:replace="~{fragments/layout :: nav('outputs')}"></nav>
+<header th:replace="~{fragments/layout :: topbar('outputs')}"></header>
 
 <main class="page">
   <div class="page-head">
     <div>
-      <h2 class="page-title">产出文件</h2>
-      <div class="page-sub">外部批量导入工具在任务文件夹中产出的 CSV，独立于主用例列表。</div>
+      <h2 class="page-title">外部任务</h2>
+      <div class="page-sub">外部任务产出与派发记录（原「产出浏览」）。</div>
     </div>
     <div class="row-actions">
       <button class="tool-btn" id="refreshOutputsBtn">刷新</button>

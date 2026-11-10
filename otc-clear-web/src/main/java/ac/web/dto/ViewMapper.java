@@ -52,6 +52,9 @@ public final class ViewMapper {
         view.put("totalRows", row.totalRows());
         view.put("invalidRows", row.invalidRows());
         view.put("note", row.note());
+        view.put("favorite", row.favorite());
+        view.put("pinned", row.pinned());
+        view.put("tags", row.tagList());
         view.put("createdAt", TimeProvider.display(row.createdAt()));
         return view;
     }

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('导出管理')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: topbar('exports')}"></header>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title">导出管理</h2>
+      <div class="page-sub">导出先生成并存档为记录，需要时再下载文件；可随时重下或删除</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <input type="search" id="exportSearch" placeholder="搜索文件名 / 产品 / 批次 ID / 导出 ID">
+    <select id="exportProduct"></select>
+    <label class="toolbar-date">导出日期
+      <input type="date" id="exportFrom" aria-label="导出日期起">
+      <span class="muted">–</span>
+      <input type="date" id="exportTo" aria-label="导出日期止">
+    </label>
+    <div class="spacer"></div>
+    <span class="muted" id="exportTotal"></span>
+  </div>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table id="exportTable">
+        <thead>
+        <tr>
+          <th class="th-sort" data-sort="created" tabindex="0">导出时间<span class="sort-arrow"></span></th>
+          <th>文件</th>
+          <th>产品</th>
+          <th>范围</th>
+          <th class="num th-sort" data-sort="rows" tabindex="0">行数<span class="sort-arrow"></span></th>
+          <th class="num th-sort" data-sort="size" tabindex="0">大小<span class="sort-arrow"></span></th>
+          <th>选项</th>
+          <th>状态</th>
+          <th data-no-resize="true">操作</th>
+        </tr>
+        </thead>
+        <tbody id="exportRows"></tbody>
+      </table>
+    </div>
+    <div class="panel-body">
+      <div class="pagination" id="exportPager"></div>
+    </div>
+  </section>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('exports')}"></th:block>
+</body>
+</html>

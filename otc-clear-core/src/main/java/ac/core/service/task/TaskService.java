@@ -13,7 +13,6 @@ import ac.core.persistence.TaskFilter;
 import ac.core.common.JsonSupport;
 import ac.core.common.TimeProvider;
 import ac.core.persistence.TestCaseRepository;
-import ac.core.service.audit.AuditService;
 import ac.core.service.DataLayout;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -43,18 +42,16 @@ public class TaskService {
     private final ImportTaskRepository taskRepository;
     private final ImportBatchRepository batchRepository;
     private final TestCaseRepository caseRepository;
-    private final AuditService audit;
     private final JsonSupport json;
     private final TimeProvider time;
     private final DataLayout dataLayout;
 
     public TaskService(ImportTaskRepository taskRepository, ImportBatchRepository batchRepository,
-            TestCaseRepository caseRepository, AuditService audit, JsonSupport json, TimeProvider time,
+            TestCaseRepository caseRepository, JsonSupport json, TimeProvider time,
             DataLayout dataLayout) {
         this.taskRepository = taskRepository;
         this.batchRepository = batchRepository;
         this.caseRepository = caseRepository;
-        this.audit = audit;
         this.json = json;
         this.time = time;
         this.dataLayout = dataLayout;
@@ -138,7 +135,6 @@ public class TaskService {
                     Map.of("name", name));
         }
         taskRepository.rename(tenantId, taskId, name);
-        audit.record(tenantId, AuditService.ENTITY_TASK, taskId, "RENAME", Map.of("name", name));
     }
 
     private String sourcePath(String tenantId, ImportBatchRow batch) {
@@ -200,8 +196,6 @@ public class TaskService {
         caseRepository.softDeleteByTask(tenantId, taskId, now);
         batchRepository.softDeleteByTask(tenantId, taskId, now);
         taskRepository.softDelete(tenantId, taskId);
-        audit.record(tenantId, AuditService.ENTITY_TASK, taskId, "DELETE",
-                Map.of("sourceName", String.valueOf(task.sourceName())));
     }
 
     public PageResult<ImportTaskRow> recent(String tenantId, int limit) {

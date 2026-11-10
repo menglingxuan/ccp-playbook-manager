@@ -9,7 +9,6 @@ import ac.core.config.AppProperties;
 import ac.core.persistence.CaseFilter;
 import ac.core.persistence.TestCaseRecord;
 import ac.core.persistence.TestCaseRepository;
-import ac.core.service.audit.AuditService;
 import ac.core.service.product.ProductCatalog;
 import ac.domain.casefile.CaseValidator;
 import ac.domain.casefile.Formulas;
@@ -38,17 +37,15 @@ public class CaseService {
     private final CaseJsonCodec codec;
     private final JsonSupport json;
     private final TimeProvider time;
-    private final AuditService audit;
     private final AppProperties properties;
 
     public CaseService(TestCaseRepository repository, ProductCatalog products, CaseJsonCodec codec,
-            JsonSupport json, TimeProvider time, AuditService audit, AppProperties properties) {
+            JsonSupport json, TimeProvider time, AppProperties properties) {
         this.repository = repository;
         this.products = products;
         this.codec = codec;
         this.json = json;
         this.time = time;
-        this.audit = audit;
         this.properties = properties;
     }
 
@@ -186,7 +183,6 @@ public class CaseService {
             throw new ApiException(ErrorCode.CONFLICT,
                     "The case was modified by someone else, reload and try again");
         }
-        audit.record(tenantId, AuditService.ENTITY_CASE, caseId, "UPDATE", Map.of("fields", request.values().keySet()));
         return detail(tenantId, caseId);
     }
 
@@ -194,7 +190,6 @@ public class CaseService {
     public void delete(String tenantId, String caseId) {
         require(tenantId, caseId);
         repository.softDelete(tenantId, caseId, time.nowUtc());
-        audit.record(tenantId, AuditService.ENTITY_CASE, caseId, "DELETE", Map.of());
     }
 
     @Transactional
@@ -207,8 +202,6 @@ public class CaseService {
             throw ApiException.limit("At most " + limit + " cases can be deleted at once");
         }
         int deleted = repository.softDeleteMany(tenantId, caseIds, time.nowUtc());
-        audit.record(tenantId, AuditService.ENTITY_CASE, null, "DELETE",
-                Map.of("count", deleted, "ids", caseIds.size()));
         return deleted;
     }
 

@@ -2,8 +2,7 @@
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head(#{products.title})}"></head>
 <body>
-<header th:replace="~{fragments/layout :: topbar}"></header>
-<nav th:replace="~{fragments/layout :: nav('products')}"></nav>
+<header th:replace="~{fragments/layout :: topbar('products')}"></header>
 
 <main class="page">
   <div class="page-head">

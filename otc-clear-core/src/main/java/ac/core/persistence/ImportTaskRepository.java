@@ -88,6 +88,18 @@ public class ImportTaskRepository {
                 .param("tenantId", tenantId).param("id", id).param("name", name).update();
     }
 
+    /** Keeps the batch counter of a task aligned when batches are cloned or removed. */
+    public void adjustBatchCount(String tenantId, String taskId, int delta) {
+        if (taskId == null || delta == 0) {
+            return;
+        }
+        jdbc.sql("""
+                        UPDATE import_task SET batch_count = GREATEST(0, batch_count + :delta)
+                        WHERE tenant_id = :tenantId AND id = :id
+                        """)
+                .param("delta", delta).param("tenantId", tenantId).param("id", taskId).update();
+    }
+
     /**
      * Base products behind the tasks, derived from the product catalogue of their batches.
      *

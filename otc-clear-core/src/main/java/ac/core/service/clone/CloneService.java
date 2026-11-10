@@ -7,9 +7,9 @@ import ac.core.common.TimeProvider;
 import ac.core.config.AppProperties;
 import ac.core.persistence.ImportBatchRepository;
 import ac.core.persistence.ImportBatchRow;
+import ac.core.persistence.ImportTaskRepository;
 import ac.core.persistence.TestCaseRecord;
 import ac.core.persistence.TestCaseRepository;
-import ac.core.service.audit.AuditService;
 import ac.core.service.cases.CaseJsonCodec;
 import ac.core.service.cases.CaseService;
 import ac.core.service.product.ProductCatalog;
@@ -45,24 +45,24 @@ public class CloneService {
     private final CaseService caseService;
     private final TestCaseRepository caseRepository;
     private final ImportBatchRepository batchRepository;
+    private final ImportTaskRepository taskRepository;
     private final ProductCatalog products;
     private final CaseJsonCodec codec;
     private final JsonSupport json;
     private final TimeProvider time;
-    private final AuditService audit;
     private final AppProperties properties;
 
     public CloneService(CaseService caseService, TestCaseRepository caseRepository,
-            ImportBatchRepository batchRepository, ProductCatalog products, CaseJsonCodec codec,
-            JsonSupport json, TimeProvider time, AuditService audit, AppProperties properties) {
+            ImportBatchRepository batchRepository, ImportTaskRepository taskRepository,
+            ProductCatalog products, CaseJsonCodec codec, JsonSupport json, TimeProvider time, AppProperties properties) {
         this.caseService = caseService;
         this.caseRepository = caseRepository;
         this.batchRepository = batchRepository;
+        this.taskRepository = taskRepository;
         this.products = products;
         this.codec = codec;
         this.json = json;
         this.time = time;
-        this.audit = audit;
         this.properties = properties;
     }
 
@@ -90,11 +90,16 @@ public class CloneService {
         }
         LocalDateTime now = time.nowUtc();
         String batchId = Ids.newId();
-        ImportBatchRow batch = new ImportBatchRow(batchId, tenantId, null, null, "CLONE", plan.parentBatchId(),
+        // the clone belongs to the same task as its parent, so the task lists both batches
+        String taskId = batchRepository.find(tenantId, plan.parentBatchId())
+                .map(ImportBatchRow::taskId)
+                .orElse(null);
+        ImportBatchRow batch = new ImportBatchRow(batchId, tenantId, taskId, null, "CLONE", plan.parentBatchId(),
                 plan.schema().code(), "clone-" + plan.schema().code(), null, "CLONE", null, 0, 0, 0, null, null,
-                plan.schema().schemaHash(), "ACTIVE", plan.rows().size(), 0, request.note(), "system", now, now,
-                null);
+                plan.schema().schemaHash(), "ACTIVE", plan.rows().size(), 0, request.note(), false, false, null,
+                "system", now, now, null);
         batchRepository.insert(batch);
+        taskRepository.adjustBatchCount(tenantId, taskId, 1);
 
         List<TestCaseRecord> records = new ArrayList<>(plan.rows().size());
         int rowNo = 0;
@@ -113,8 +118,6 @@ public class CloneService {
             caseRepository.insertAll(records.subList(start, Math.min(records.size(), start + INSERT_CHUNK)));
         }
 
-        audit.record(tenantId, AuditService.ENTITY_BATCH, batchId, "CLONE",
-                Map.of("sources", plan.sourceCount(), "copies", request.copies(), "rows", records.size()));
         return new CloneResult(batchId, records.size());
     }
 

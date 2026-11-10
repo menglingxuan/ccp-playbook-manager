@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('资源统计')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: topbar('resources')}"></header>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h2 class="page-title">资源统计</h2>
+      <div class="page-sub">当前租户的文件占用与数据库消耗概览；数据实时读取，可随时刷新</div>
+    </div>
+    <div class="page-head-actions">
+      <span class="chip muted" id="resGenerated"></span>
+      <button class="tool-btn" id="resReload">刷新</button>
+    </div>
+  </div>
+
+  <div class="res-cards" id="resCards"></div>
+
+  <section class="panel" style="margin-top:16px">
+    <div class="panel-head">
+      <h3>文件存储</h3>
+      <span class="muted" id="resTenantPath"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="resAreaTable">
+        <thead>
+        <tr>
+          <th>区域</th>
+          <th class="num">文件数</th>
+          <th class="num">占用</th>
+          <th>占比</th>
+          <th>最近变更</th>
+          <th data-no-resize="true">说明</th>
+        </tr>
+        </thead>
+        <tbody id="resAreaRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:16px">
+    <div class="panel-head">
+      <h3>数据库资源</h3>
+      <span class="muted" id="resDatabaseInfo"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="resTableTable">
+        <thead>
+        <tr>
+          <th>数据表</th>
+          <th class="num">行数</th>
+          <th>占比</th>
+          <th data-no-resize="true">说明</th>
+        </tr>
+        </thead>
+        <tbody id="resTableRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:16px">
+    <div class="panel-head"><h3>运行时</h3></div>
+    <div class="panel-body"><div class="kv" id="resRuntime"></div></div>
+  </section>
+</main>
+
+<div th:replace="~{fragments/layout :: toast}"></div>
+<th:block th:replace="~{fragments/layout :: scripts('resources')}"></th:block>
+</body>
+</html>

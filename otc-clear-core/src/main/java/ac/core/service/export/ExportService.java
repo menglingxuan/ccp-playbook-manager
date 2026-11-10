@@ -6,6 +6,7 @@ import ac.core.common.JsonSupport;
 import ac.core.common.PageQuery;
 import ac.core.common.PageResult;
 import ac.core.common.TimeProvider;
+import ac.core.persistence.ExportFilter;
 import ac.core.persistence.ExportJobRepository;
 import ac.core.persistence.ExportJobRow;
 import ac.core.persistence.ImportBatchRepository;
@@ -13,7 +14,6 @@ import ac.core.persistence.ImportBatchRow;
 import ac.core.persistence.TestCaseRecord;
 import ac.core.persistence.TestCaseRepository;
 import ac.core.service.DataLayout;
-import ac.core.service.audit.AuditService;
 import ac.core.service.baseline.BaselineStore;
 import ac.core.service.cases.CaseJsonCodec;
 import ac.core.service.cases.CaseService;
@@ -64,13 +64,12 @@ public class ExportService {
     private final DataLayout dataLayout;
     private final ExportJobRepository exportRepository;
     private final SettingsService settings;
-    private final AuditService audit;
     private final BaselineStore baselines;
 
     public ExportService(CaseService caseService, TestCaseRepository caseRepository,
             ImportBatchRepository batchRepository, ProductCatalog products, CaseJsonCodec codec,
             JsonSupport json, TimeProvider time, DataLayout dataLayout, ExportJobRepository exportRepository,
-            SettingsService settings, AuditService audit, BaselineStore baselines) {
+            SettingsService settings, BaselineStore baselines) {
         this.caseService = caseService;
         this.caseRepository = caseRepository;
         this.batchRepository = batchRepository;
@@ -81,7 +80,6 @@ public class ExportService {
         this.dataLayout = dataLayout;
         this.exportRepository = exportRepository;
         this.settings = settings;
-        this.audit = audit;
         this.baselines = baselines;
     }
 
@@ -194,16 +192,42 @@ public class ExportService {
                         "lineEnding", options.lineEnding().equals("\n") ? "LF" : "CRLF")),
                 "COMPLETED", null, "system", time.nowUtc());
         exportRepository.insert(job);
-        audit.record(tenantId, AuditService.ENTITY_EXPORT, exportId, "EXPORT",
-                Map.of("rows", rows.size(), "file", fileName));
 
         return new ExportResult(exportId, fileName, rows.size(), size, TimeProvider.display(job.createdAt()),
                 issues.stream().map(ValidationIssue::message).toList());
     }
 
     public PageResult<ExportJobRow> history(String tenantId, PageQuery page) {
-        return new PageResult<>(exportRepository.page(tenantId, page), page.page(), page.size(),
-                exportRepository.count(tenantId));
+        return history(tenantId, new ExportFilter(page));
+    }
+
+    /** Filtered history of the export management panel. */
+    public PageResult<ExportJobRow> history(String tenantId, ExportFilter filter) {
+        return new PageResult<>(exportRepository.page(tenantId, filter), filter.page().page(),
+                filter.page().size(), exportRepository.count(tenantId, filter));
+    }
+
+    /** True when the stored CSV of one export is still on disk. */
+    public boolean fileExists(String tenantId, ExportJobRow job) {
+        try {
+            Path path = dataLayout.resolveInside(dataLayout.tenantRoot(tenantId), job.storagePath());
+            return Files.isRegularFile(path);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** Removes one history entry together with its stored file. */
+    @Transactional
+    public void delete(String tenantId, String exportId) {
+        ExportJobRow job = requireJob(tenantId, exportId);
+        try {
+            Path path = dataLayout.resolveInside(dataLayout.tenantRoot(tenantId), job.storagePath());
+            Files.deleteIfExists(path);
+        } catch (IOException | RuntimeException e) {
+            log.warn("Cannot delete export file of {}: {}", exportId, e.toString());
+        }
+        exportRepository.delete(tenantId, exportId);
     }
 
     public ExportJobRow requireJob(String tenantId, String exportId) {

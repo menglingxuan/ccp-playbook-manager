@@ -1,14 +1,13 @@
 <!doctype html>
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/layout :: head('产出详情')}"></head>
+<head th:replace="~{fragments/layout :: head('外部任务详情')}"></head>
 <body th:attr="data-output-id=${outputId}">
-<header th:replace="~{fragments/layout :: topbar}"></header>
-<nav th:replace="~{fragments/layout :: nav('outputs')}"></nav>
+<header th:replace="~{fragments/layout :: topbar('outputs')}"></header>
 
 <main class="page">
   <div class="page-head">
     <div>
-      <h2 class="page-title" id="outputTitle">产出详情</h2>
+      <h2 class="page-title" id="outputTitle">外部任务详情</h2>
       <div class="page-sub" id="outputSubtitle"></div>
     </div>
     <div class="row-actions">

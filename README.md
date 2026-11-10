@@ -58,7 +58,7 @@ java -Dapp.data-root=./data -jar otc-clear-web/build/libs/otc-clear-testdata.jar
 
 | 参数 | 行为 |
 | --- | --- |
-| `--tenant` + `--tenant-id=xxx` | `app.mode=TENANT`，租户 id 需匹配 `[a-z0-9-]{1,32}` |
+| `--tenant` + `--tenant-id=xxx` | `app.mode=TENANT`，租户 id 需匹配 `[a-z0-9-]{1,32}`（也接受 `--tenant-id xxx` 写法） |
 | `--tenant` 缺 `--tenant-id` | 启动失败并给出原因 |
 | `--no-tenant` | `app.mode=SINGLE`，租户固定 `default` |
 | 两者同时 | 启动失败 |
@@ -67,7 +67,37 @@ java -Dapp.data-root=./data -jar otc-clear-web/build/libs/otc-clear-testdata.jar
 数据目录优先级：`-Dapp.data-root=...` > 环境变量 `APP_DATA_ROOT` > `./data`。
 （数据目录必须在上下文启动前确定，因为 H2 的 JDBC URL 由它推导；因此不通过 `application.yml` 调整。）
 
+解析出的 `app.mode` / `app.tenant.id` / `app.data-root` 与 `spring.datasource.url` 以**最高优先级属性源**注入（`StartupPropertyOverrides`），
+`application.yml` 有意不再声明这些键：Spring Boot 的默认属性优先级最低，写进配置文件反而会把启动参数盖掉（曾导致租户实例显示「单机模式」）。
+
 Windows 下可直接双击 `run-single.cmd` / `run-tenant.cmd`（见仓库根目录）。
+
+### 配置档（dev / prod）
+
+| 文件 | 用途 | 主要差异 |
+| --- | --- | --- |
+| `application.yml` | 公共配置 | 端口、限流、导入/导出默认值、Flyway、日志级别；`spring.profiles.default: dev` |
+| `application-dev.yml` | **默认**：开发与测试 | Thymeleaf 不缓存、health 详情全开、连接池 8、`app.audit.enabled: true`、`app.resources.heap-metrics-enabled: true` + `disk-metrics-enabled: true` |
+| `application-prod.yml` | 生产 | Thymeleaf 缓存开启、health 详情关闭、连接池 24、`app.audit.enabled: false`、`app.resources.heap-metrics-enabled: false` + `disk-metrics-enabled: false` |
+
+不指定 profile 时使用 `dev`；需要切换到生产配置时显式指定，例如：
+
+```bash
+java -Dspring.profiles.active=prod -Dapp.data-root=./data -jar otc-clear-web/build/libs/otc-clear-testdata.jar --tenant --tenant-id=hkex-otc
+```
+
+`app.audit.enabled=false`（prod 默认）时不写审计记录，导航不显示「审计日志」，`/audit` 与 `/api/audit` 均返回 404，
+「关于」页面也不再出现任何与审计相关的文案或入口。
+
+`app.resources.heap-metrics-enabled` / `app.resources.disk-metrics-enabled`（prod 默认关闭）控制【资源统计】里的
+堆内存（含非堆内存）与磁盘空间数据：关闭后后端不再读取这些指标（接口返回 0，`metrics` 标记为 `false`），
+页面对应的卡片与行整块隐藏，其余租户级统计不受影响。
+
+## 审计范围
+
+当前只对 **产品定义**（`BASE_PRODUCT` / `BASE_FIELD` / `PRODUCT` / `PRODUCT_FIELD`）与 **字段元信息**（`META_SET` / `META_ITEM`）
+的改动写审计；任务、批次、用例、导出、外部任务、克隆等模块不再写审计。审计记录按功能模块（`module`）、审计对象（`entity_type`）、
+动作（`action`）分类，历史记录在迁移 `V8__audit_module.sql` 中按实体回填模块代码。
 
 ## 数据目录
 
@@ -88,14 +118,27 @@ data/tenants/{tenant}/
 | 任务面板 | `/` | 任务搜索（任务 ID / 任务名称 / 文件名 / 基产品）、基产品（按平台分组）与创建日期区间筛选、删除，状态统计卡片；任务名称默认 `Untitled` 且可点击重命名（唯一、≤256 字符）；任务名称 / 批次数 / 创建时间可排序（升序 → 降序 → 原始顺序）；源文件失效时文件名加删除线；表格数字列居中、列宽可拖动 |
 | 导入向导 | `/import` | 上传 → 参数化预览（400ms 防抖）→ 提交；未选择产品时只做原始数据预览（不套用设置项、不可提交），选择产品后按定义校验；表头行、定义起始列、数据起始/结束行可调；预览表按交易字段 / 管理列 / 未映射列分色并懒加载分页（默认 20 行），公式单元格带 `ƒ` 标记；「导入选项」控制管理列与未映射列是否落库，「空行前停止」「错误行前停止」控制扫描终止条件；状态标签可点击折叠问题区；结果面板与预览面板同宽，成功/失败分别展示，且不重复预览阶段已展示的列映射提示 |
 | 任务详情 | `/tasks/{id}` | 批次列表、统计、问题明细 |
-| 批次列表 | `/batches` | 全部批次（导入 + 克隆），按产品/来源/关键字筛选，进入详情 |
-| 批次详情 | `/batches/{id}` | 用例表格、纵向浏览、编辑、克隆、导出（默认导出前重算工作簿公式） |
-| 产出浏览 | `/outputs`、`/outputs/{id}` | 产出文件独立浏览（不进主用例列表） |
+| 批次浏览 | `/batches` | 左中右版式（内容居中、最大 1400px，两侧留出停靠栏空间，侧栏 300px + 主表自适应）：贴边竖排停靠栏（可切左/右，含最近/置顶批次方块与角标）+ 悬浮批次管理抽屉（紧贴停靠栏、可拖动调宽：搜索、产品/来源/标签/日期筛选、收藏/置顶、排序、分面计数、备注与标签编辑、删除）+ 用例侧栏（搜索、排序、仅公式、懒加载、上下条）+ 字段明细主表（表头筛选与排序、筛选标签与锁定）；全局搜索支持 `tag:` `product:` `batch:` `case:` `value:` 等限定词；快捷键 `/` `G` `B` `F` `J/K` `L` `Space` `Enter` `Esc` |
+| 批次详情 | `/batches/{id}` | 单批次信息、用例表格、纵向浏览、编辑、克隆与导出（导出先生成记录，需要时再下载）；任务面板 → 批次详情同样进入此页 |
+| 导出管理 | `/exports` | 导出记录列表（时间 / 文件 / 产品 / 范围 / 行数 / 大小 / CSV 选项 / 状态），支持搜索、产品与日期筛选、排序、下载、删除与跳回批次 |
+| 外部任务 | `/outputs`、`/outputs/{id}` | 外部任务产出与派发记录（原「产出浏览」，仅改名） |
 | 产品定义 | `/products` | 平台 → 基产品 → 产品，字段继承与裁剪 |
 | 字段元信息 | `/meta` | 值类型 / 角色类型 / 标签等枚举字典 |
-| 关于 | `/about` | 运行模式、租户、数据目录、审计日志 |
+| 资源统计 | `/resources` | 当前租户的资源占用：文件存储（上传缓存 / 批次基线 / 导出文件 / 外部任务 / 数据库文件）的文件数、占用、占比与最近变更；数据库产品与版本、各业务表行数；运行时（线程、运行时长、处理器、系统负载）与磁盘可用空间；堆内存与磁盘两组指标由 `app.resources.*` 控制（prod 默认关闭，关闭后卡片与行整块隐藏）；可随时刷新 |
+| 审计日志 | `/audit` | 按功能模块、审计对象、动作、关键词与日期分类查看变更记录，详情可展开；仅记录「产品定义」与「字段元信息」的改动，入口由 `app.audit.enabled` 控制（prod 默认关闭，页面与接口均返回 404） |
+| 关于 | `/about` | 运行模式、租户、数据目录、版本、数据库类型与版本、配置档与功能入口（审计模块已迁至「审计日志」面板） |
 
 REST API 见 [docs/REST接口.md](./docs/REST接口.md)，CSV 细节见 [docs/CSV格式说明.md](./docs/CSV格式说明.md)。
+
+## 页面壳（banner 与导航）
+
+全站共用 `fragments/layout.html` 中的 `topbar(active)` 片段：标题、副标题（版本与产品）、右侧语言 / 主题下拉，
+下方紧接主导航，导航与 banner 同属一块吸顶区域（`position: sticky`），页面滚动时一起留在顶部。
+
+- 导航项为半透明白色胶囊（底色 `rgba(255,255,255,.10)`），悬停上浮并提亮，当前页为实心白胶囊 + 深色文字，在 11 套主题的深色 banner 上都保持足够对比度；
+- 导航与标题之间用一条 `rgba(255,255,255,.16)` 细线分隔，banner 叠加左上角柔光渐变以获得层次；
+- 入场动效：导航项自上而下淡入（每项间隔 25ms），当前页胶囊额外有一次向外扩散的光晕；`prefers-reduced-motion` 下全部关闭；
+- `ui.initShell()` 用 `ResizeObserver` 把 banner 实际高度写入 `--topbar-h`，用例侧栏与明细表的吸顶 / 最大高度据此计算，窄屏换行时自动跟随。
 
 ## 多语言
 

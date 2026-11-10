@@ -2,7 +2,9 @@ package ac.core.persistence;
 
 import ac.core.common.PageQuery;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -52,17 +54,79 @@ public class ExportJobRepository {
     }
 
     public List<ExportJobRow> page(String tenantId, PageQuery page) {
-        return jdbc.sql("SELECT " + COLUMNS + """
-                         FROM export_job WHERE tenant_id = :tenantId
-                         ORDER BY created_at DESC LIMIT :limit OFFSET :offset
-                        """)
-                .param("tenantId", tenantId).param("limit", page.size()).param("offset", page.offset())
-                .query(this::map).list();
+        return page(tenantId, new ExportFilter(page));
+    }
+
+    /** Filtered history of the export management panel. */
+    public List<ExportJobRow> page(String tenantId, ExportFilter filter) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        String where = whereClause(tenantId, filter, params);
+        params.put("limit", filter.page().size());
+        params.put("offset", filter.page().offset());
+        return jdbc.sql("SELECT " + COLUMNS + " FROM export_job e " + where + orderBy(filter.sort())
+                + " LIMIT :limit OFFSET :offset").params(params).query(this::map).list();
     }
 
     public long count(String tenantId) {
-        return jdbc.sql("SELECT COUNT(*) FROM export_job WHERE tenant_id = :tenantId")
-                .param("tenantId", tenantId).query(Long.class).single();
+        return count(tenantId, new ExportFilter(PageQuery.of(1, 1)));
+    }
+
+    public long count(String tenantId, ExportFilter filter) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        String where = whereClause(tenantId, filter, params);
+        return jdbc.sql("SELECT COUNT(*) FROM export_job e " + where).params(params)
+                .query(Long.class).single();
+    }
+
+    /** Removes one history entry; the stored file is deleted by the service. */
+    public void delete(String tenantId, String id) {
+        jdbc.sql("DELETE FROM export_job WHERE tenant_id = :tenantId AND id = :id")
+                .param("tenantId", tenantId).param("id", id).update();
+    }
+
+    private String whereClause(String tenantId, ExportFilter filter, Map<String, Object> params) {
+        StringBuilder sql = new StringBuilder("WHERE e.tenant_id = :tenantId");
+        params.put("tenantId", tenantId);
+        if (filter.product() != null && !filter.product().isBlank()) {
+            sql.append(" AND e.product_code = :product");
+            params.put("product", filter.product().trim().toUpperCase(java.util.Locale.ROOT));
+        }
+        if (filter.batchId() != null && !filter.batchId().isBlank()) {
+            sql.append(" AND e.batch_id = :batchId");
+            params.put("batchId", filter.batchId().trim());
+        }
+        if (filter.from() != null) {
+            sql.append(" AND e.created_at >= :createdFrom");
+            params.put("createdFrom", utcStartOfDay(filter.from()));
+        }
+        if (filter.to() != null) {
+            sql.append(" AND e.created_at < :createdTo");
+            params.put("createdTo", utcStartOfDay(filter.to().plusDays(1)));
+        }
+        if (filter.query() != null && !filter.query().isBlank()) {
+            sql.append(" AND (LOWER(e.file_name) LIKE :query OR LOWER(e.product_code) LIKE :query")
+                    .append(" OR LOWER(e.batch_id) LIKE :query OR LOWER(e.id) LIKE :query)");
+            params.put("query", "%" + filter.query().trim().toLowerCase(java.util.Locale.ROOT) + "%");
+        }
+        return sql.toString();
+    }
+
+    private static java.time.LocalDateTime utcStartOfDay(java.time.LocalDate date) {
+        return date.atStartOfDay(ac.core.common.TimeProvider.DISPLAY_ZONE)
+                .withZoneSameInstant(java.time.ZoneOffset.UTC).toLocalDateTime();
+    }
+
+    private static String orderBy(String sort) {
+        String key = sort == null || sort.isBlank() ? "created" : sort.trim().toLowerCase(java.util.Locale.ROOT);
+        boolean ascending = key.endsWith("_asc");
+        String field = ascending ? key.substring(0, key.length() - 4)
+                : key.endsWith("_desc") ? key.substring(0, key.length() - 5) : key;
+        String direction = ascending ? " ASC" : " DESC";
+        return switch (field) {
+            case "rows" -> " ORDER BY e.row_count" + direction + ", e.created_at DESC";
+            case "size" -> " ORDER BY e.file_size" + direction + ", e.created_at DESC";
+            default -> " ORDER BY e.created_at" + direction + ", e.id";
+        };
     }
 
     private ExportJobRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

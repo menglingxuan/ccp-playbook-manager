@@ -1,7 +1,7 @@
 package ac;
 
 import ac.core.config.StartupModeResolver;
-import java.util.LinkedHashMap;
+import ac.core.config.StartupPropertyOverrides;
 import java.util.Map;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -17,16 +17,12 @@ public class OtcTestDataApplication {
 
         StartupModeResolver.StartupResolution resolution =
                 StartupModeResolver.resolve(args, configuredRoot, configuredTenant);
+        Map<String, Object> overrides = StartupPropertyOverrides.of(resolution);
 
-        Map<String, Object> overrides = new LinkedHashMap<>();
-        overrides.put("app.mode", resolution.mode().name());
-        overrides.put("app.tenant.id", resolution.tenantId());
-        overrides.put("app.data-root", resolution.dataRoot());
-        overrides.put("spring.datasource.url", resolution.databaseUrl());
-        overrides.put("spring.flyway.url", resolution.databaseUrl());
-
+        // The resolution is applied as the first property source: the same keys exist in
+        // application.yml, and default properties would lose against them.
         new SpringApplicationBuilder(OtcTestDataApplication.class)
-                .properties(overrides)
+                .initializers(context -> StartupPropertyOverrides.apply(context.getEnvironment(), overrides))
                 .run(args);
     }
 

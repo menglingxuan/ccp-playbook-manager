@@ -6,6 +6,8 @@ import ac.core.common.TimeProvider;
 import ac.core.persistence.BaseProductRepository;
 import ac.core.persistence.MetaRepository;
 import ac.core.persistence.ProductRepository;
+import ac.core.service.audit.AuditModule;
+import ac.core.service.audit.AuditService;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -29,13 +31,15 @@ public class MetaService {
     private final BaseProductRepository baseProducts;
     private final ProductRepository products;
     private final TimeProvider time;
+    private final AuditService audit;
 
     public MetaService(MetaRepository meta, BaseProductRepository baseProducts, ProductRepository products,
-            TimeProvider time) {
+            TimeProvider time, AuditService audit) {
         this.meta = meta;
         this.baseProducts = baseProducts;
         this.products = products;
         this.time = time;
+        this.audit = audit;
     }
 
     /**
@@ -102,6 +106,8 @@ public class MetaService {
         int order = sortOrder == null || sortOrder <= 0 ? meta.sets(tenantId).size() + 1 : sortOrder;
         meta.insertSet(tenantId, new MetaRepository.MetaSetRow(normalized, requireText(name, "Set name"),
                 description, false, order), time.nowUtc());
+        audit.record(tenantId, AuditModule.META_DICTIONARY, AuditService.ENTITY_META_SET, normalized, "CREATE",
+                Map.of("name", name));
         return new SetView(normalized, name, description, false, order, 0);
     }
 
@@ -110,6 +116,8 @@ public class MetaService {
         MetaRepository.MetaSetRow row = requireSet(tenantId, code);
         int order = sortOrder == null || sortOrder <= 0 ? row.sortOrder() : sortOrder;
         meta.updateSet(tenantId, code, requireText(name, "Set name"), description, order, time.nowUtc());
+        audit.record(tenantId, AuditModule.META_DICTIONARY, AuditService.ENTITY_META_SET, row.code(), "UPDATE",
+                Map.of("name", name));
     }
 
     @Transactional
@@ -130,6 +138,8 @@ public class MetaService {
                     Map.of("referencing", referencing));
         }
         meta.deleteSet(tenantId, code);
+        audit.record(tenantId, AuditModule.META_DICTIONARY, AuditService.ENTITY_META_SET, code, "DELETE",
+                Map.of("name", row.name()));
     }
 
     @Transactional
@@ -147,6 +157,8 @@ public class MetaService {
         requireFreeOrder(tenantId, setCode, order, null);
         meta.insertItem(tenantId, new MetaRepository.MetaItemRow(setCode, normalized,
                 requireText(label, "Item label"), ref, order, true, remark), time.nowUtc());
+        audit.record(tenantId, AuditModule.META_DICTIONARY, AuditService.ENTITY_META_ITEM,
+                setCode + "/" + normalized, "CREATE", Map.of("label", label, "setCode", setCode));
         return new ItemView(normalized, label, ref, order, true, remark);
     }
 
@@ -166,6 +178,9 @@ public class MetaService {
         boolean on = enabled == null ? row.enabled() : enabled;
         meta.updateItem(tenantId, setCode, code, requireText(label, "Item label"), ref, order, on,
                 remark, time.nowUtc());
+        audit.record(tenantId, AuditModule.META_DICTIONARY, AuditService.ENTITY_META_ITEM,
+                setCode + "/" + row.code(), "UPDATE",
+                Map.of("label", label, "enabled", on, "setCode", setCode));
     }
 
     /** Rejects an order already used by another item of the same set. */
@@ -189,6 +204,8 @@ public class MetaService {
                     Map.of("usage", usage));
         }
         meta.deleteItem(tenantId, setCode, code);
+        audit.record(tenantId, AuditModule.META_DICTIONARY, AuditService.ENTITY_META_ITEM,
+                setCode + "/" + code, "DELETE", Map.of("setCode", setCode));
     }
 
     public MetaRepository.MetaSetRow requireSet(String tenantId, String code) {

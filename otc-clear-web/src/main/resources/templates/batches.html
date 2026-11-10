@@ -1,54 +1,65 @@
 <!doctype html>
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/layout :: head('批次列表')}"></head>
+<head th:replace="~{fragments/layout :: head('批次浏览')}"></head>
 <body>
-<header th:replace="~{fragments/layout :: topbar}"></header>
-<nav th:replace="~{fragments/layout :: nav('batches')}"></nav>
+<header th:replace="~{fragments/layout :: topbar('batches')}"></header>
 
-<main class="page">
-  <div class="page-head">
-    <div>
-      <h2 class="page-title">批次列表</h2>
-      <div class="page-sub">导入批次与克隆批次，点击批次号进入详情</div>
+<!-- recent and pinned batches; the toggle opens the management drawer -->
+<nav class="batch-dock" id="batchDock" aria-label="批次停靠栏"></nav>
+<aside class="batch-panel" id="batchPanel" aria-label="批次管理" hidden></aside>
+<aside class="batch-panel fav-panel" id="favoritesPanel" aria-label="收藏夹" hidden></aside>
+
+<main class="page console-page">
+  <div class="console-bar">
+    <div class="console-search">
+      <input type="search" id="globalSearch" autocomplete="off"
+             placeholder="搜索批次 / 用例 / 字段值…  支持 tag: product: case: value: scope:"
+             title="回车执行全局搜索（G）；限定词：tag: product: batch: case: value: note: file: scope:">
+      <button class="tool-btn" id="globalSearchBtn" title="全局搜索（G）">全局搜索</button>
+      <button class="tool-btn ghost" id="consoleHelpBtn" title="快捷键与语法（?）">?</button>
     </div>
+    <div class="console-chips" id="filterChips"></div>
   </div>
 
-  <div class="toolbar">
-    <input type="search" id="batchSearch" placeholder="搜索批次号 / 产品 / 源文件 / 备注…">
-    <select id="batchProduct"></select>
-    <select id="batchKind">
-      <option value="">全部来源</option>
-      <option value="IMPORT">文件导入</option>
-      <option value="CLONE">克隆</option>
-      <option value="OUTPUT">外部产出</option>
-    </select>
-    <div class="spacer"></div>
-    <button class="tool-btn" id="refreshBatchesBtn">刷新</button>
-  </div>
+  <div class="console-layout">
+    <aside class="console-side" id="consoleSide" aria-label="用例列表">
+      <div class="side-head">
+        <span class="side-title">用例</span>
+        <span class="side-count" id="caseCount">0</span>
+        <span class="side-nav" id="caseNav"></span>
+        <button class="side-btn" id="sideCollapse" title="折叠侧栏">‹</button>
+      </div>
+      <div class="side-filters">
+        <input type="search" id="caseSearch" placeholder="搜索用例 ID / Trade ID / 字段值…">
+        <div class="side-filter-row">
+          <select id="caseSort">
+            <option value="row">原始顺序</option>
+            <option value="testcase_asc">用例 ID ↑</option>
+            <option value="testcase_desc">用例 ID ↓</option>
+            <option value="key_asc">Trade ID ↑</option>
+            <option value="key_desc">Trade ID ↓</option>
+            <option value="formulas_desc">公式数 ↓</option>
+            <option value="updated_desc">更新时间 ↓</option>
+          </select>
+          <select id="caseFormula">
+            <option value="">全部用例</option>
+            <option value="true">仅含公式</option>
+          </select>
+        </div>
+      </div>
+      <div class="side-summary" id="caseSummary"></div>
+      <div class="side-list" id="caseList"></div>
+      <div class="side-foot" id="caseFoot"></div>
+    </aside>
 
-  <section class="panel">
-    <div class="table-wrap">
-      <table id="batchTable">
-        <thead>
-        <tr>
-          <th>批次</th>
-          <th>产品</th>
-          <th>来源</th>
-          <th>Sheet</th>
-          <th class="num">行数</th>
-          <th class="num">无效</th>
-          <th>备注</th>
-          <th>创建时间</th>
-          <th data-no-resize="true">操作</th>
-        </tr>
-        </thead>
-        <tbody id="batchRows"></tbody>
-      </table>
-    </div>
-    <div class="panel-body">
-      <div class="pagination" id="batchPager"></div>
-    </div>
-  </section>
+    <button class="side-expand" id="sideExpand" title="展开侧栏" hidden>›</button>
+
+    <section class="console-main" id="consoleMain">
+      <div class="detail-head" id="detailHead"></div>
+      <div class="detail-filters" id="detailFilters"></div>
+      <div class="detail-body" id="detailBody"></div>
+    </section>
+  </div>
 </main>
 
 <div th:replace="~{fragments/layout :: toast}"></div>

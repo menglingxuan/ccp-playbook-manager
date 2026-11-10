@@ -91,6 +91,27 @@ class ImportFlowTest extends AbstractIntegrationTest {
                 "caseIds", List.of(caseId), "copies", 2, "template", "{base}-C{seq:02}", "note", "it")));
         assertThat(clone.ok()).as(clone.body()).isTrue();
         assertThat(clone.json().get("created").asInt()).isEqualTo(2);
+        String cloneBatchId = clone.json().get("batchId").asString();
+
+        // a clone belongs to the task of its parent, so both batches are listed under the task
+        JsonNode taskDetail = api.get("/api/tasks/" + taskId).json();
+        List<String> taskBatchIds = new java.util.ArrayList<>();
+        taskDetail.get("batches").forEach(item -> taskBatchIds.add(item.get("id").asString()));
+        assertThat(taskBatchIds).contains(batchId, cloneBatchId);
+        JsonNode cloneRow = null;
+        for (JsonNode item : taskDetail.get("batches")) {
+            if (cloneBatchId.equals(item.get("id").asString())) {
+                cloneRow = item;
+            }
+        }
+        assertThat(cloneRow).as("clone listed under the task").isNotNull();
+        assertThat(cloneRow.get("taskId").asString()).isEqualTo(taskId);
+        assertThat(cloneRow.get("parentBatchId").asString()).isEqualTo(batchId);
+        assertThat(cloneRow.get("kind").asString()).isEqualTo("CLONE");
+
+        // and the task counter counts it
+        JsonNode taskPage = api.get("/api/tasks?q=" + taskId).json();
+        assertThat(taskPage.get("items").get(0).get("batchCount").asInt()).isEqualTo(2);
 
         Map<String, Object> exportRequest = Map.of(
                 "batchId", batchId,

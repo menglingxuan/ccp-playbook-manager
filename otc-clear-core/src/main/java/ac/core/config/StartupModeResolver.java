@@ -14,6 +14,9 @@ public final class StartupModeResolver {
     /**
      * Parses {@code --tenant --tenant-id=xxx} and {@code --no-tenant}.
      *
+     * <p>{@code --tenant-id xxx} is accepted as well, so a missing {@code =} does not silently drop
+     * the tenant.
+     *
      * @param args raw command line arguments
      * @return property overrides applied to the environment
      * @throws IllegalStateException when the arguments are contradictory or incomplete
@@ -22,13 +25,16 @@ public final class StartupModeResolver {
         boolean tenantFlag = false;
         boolean singleFlag = false;
         String tenantId = null;
-        for (String arg : args) {
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
             if ("--tenant".equals(arg)) {
                 tenantFlag = true;
             } else if ("--no-tenant".equals(arg)) {
                 singleFlag = true;
             } else if (arg.startsWith("--tenant-id=")) {
                 tenantId = arg.substring("--tenant-id=".length()).trim();
+            } else if ("--tenant-id".equals(arg) && i + 1 < args.length) {
+                tenantId = args[++i].trim();
             }
         }
         if (tenantFlag && singleFlag) {

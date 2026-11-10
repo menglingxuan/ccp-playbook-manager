@@ -2,8 +2,7 @@
 <html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('导入任务')}"></head>
 <body>
-<header th:replace="~{fragments/layout :: topbar}"></header>
-<nav th:replace="~{fragments/layout :: nav('tasks')}"></nav>
+<header th:replace="~{fragments/layout :: topbar('tasks')}"></header>
 
 <main class="page">
   <section class="summary" id="summaryCards"></section>

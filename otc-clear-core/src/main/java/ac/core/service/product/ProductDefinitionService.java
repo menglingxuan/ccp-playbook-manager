@@ -14,6 +14,7 @@ import ac.core.persistence.ProductRepository.ProductFieldRow;
 import ac.core.persistence.ProductRepository.ProductRow;
 import ac.core.persistence.TagCodec;
 import ac.core.persistence.TestCaseRepository;
+import ac.core.service.audit.AuditModule;
 import ac.core.service.audit.AuditService;
 import ac.core.service.meta.MetaService;
 import ac.core.service.product.ProductViews.BaseFieldView;
@@ -148,7 +149,7 @@ public class ProductDefinitionService {
                 displayName, description, "ACTIVE", sortOrder, null, now, now);
         baseRepository.insert(row);
         refreshBaseHash(tenantId, row.id());
-        audit.record(tenantId, "BASE_PRODUCT", row.id(), "CREATE",
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_BASE_PRODUCT, row.id(), "CREATE",
                 Map.of("platform", platform.name(), "code", code));
         return toSummary(tenantId, requireBase(tenantId, row.id()));
     }
@@ -187,7 +188,7 @@ public class ProductDefinitionService {
             created.add(fieldKey);
         }
         refreshBaseHash(tenantId, baseProductId);
-        audit.record(tenantId, "BASE_PRODUCT", baseProductId, "IMPORT_FIELDS",
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_BASE_PRODUCT, baseProductId, "IMPORT_FIELDS",
                 Map.of("headers", headers.size(), "created", created.size()));
         return created;
     }
@@ -199,7 +200,7 @@ public class ProductDefinitionService {
         int order = sortOrder == null ? base.sortOrder() : sortOrder;
         baseRepository.update(baseProductId, MetaService.requireText(name, "Base product name"), description,
                 order, time.nowUtc());
-        audit.record(tenantId, "BASE_PRODUCT", baseProductId, "UPDATE", Map.of("name", name));
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_BASE_PRODUCT, baseProductId, "UPDATE", Map.of("name", name));
     }
 
     @Transactional
@@ -212,7 +213,7 @@ public class ProductDefinitionService {
                     Map.of("productCount", products));
         }
         baseRepository.delete(baseProductId);
-        audit.record(tenantId, "BASE_PRODUCT", baseProductId, "DELETE", Map.of());
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_BASE_PRODUCT, baseProductId, "DELETE", Map.of());
     }
 
     // ---------------------------------------------------------------- base fields
@@ -231,7 +232,7 @@ public class ProductDefinitionService {
                 spec.tags(), request.required(), true, false, order, request.remark(), "", "");
         baseRepository.insertField(row);
         refreshBaseHash(tenantId, baseProductId);
-        audit.record(tenantId, "BASE_FIELD", row.id(), "CREATE",
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_BASE_FIELD, row.id(), "CREATE",
                 Map.of("baseProductId", baseProductId, "fieldKey", row.fieldKey()));
         return toBaseFieldView(row, lookup);
     }
@@ -254,7 +255,7 @@ public class ProductDefinitionService {
         baseRepository.updateField(updated, time.nowUtc());
         propagateBaseField(tenantId, updated);
         refreshBaseHash(tenantId, baseProductId);
-        audit.record(tenantId, "BASE_FIELD", fieldId, "UPDATE", Map.of("fieldKey", updated.fieldKey()));
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_BASE_FIELD, fieldId, "UPDATE", Map.of("fieldKey", updated.fieldKey()));
         return toBaseFieldView(updated, lookup);
     }
 
@@ -270,7 +271,7 @@ public class ProductDefinitionService {
             refreshProductHash(tenantId, product.id());
         }
         refreshBaseHash(tenantId, baseProductId);
-        audit.record(tenantId, "BASE_FIELD", fieldId, "DELETE",
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_BASE_FIELD, fieldId, "DELETE",
                 Map.of("fieldKey", existing.fieldKey(), "productCopies", removedCopies));
         return removedCopies;
     }
@@ -320,7 +321,7 @@ public class ProductDefinitionService {
             productRepository.insertField(copyOf(tenantId, row.id(), field, order), now);
         }
         refreshProductHash(tenantId, row.id());
-        audit.record(tenantId, "PRODUCT", row.id(), "CREATE",
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_PRODUCT, row.id(), "CREATE",
                 Map.of("baseProductId", baseProductId, "code", productCode));
         return toSummary(tenantId, requireProduct(tenantId, row.id()));
     }
@@ -335,7 +336,7 @@ public class ProductDefinitionService {
         productRepository.update(productId, MetaService.requireText(newName, "Product name"), newDescription,
                 strict, time.nowUtc());
         refreshProductHash(tenantId, productId);
-        audit.record(tenantId, "PRODUCT", productId, "UPDATE",
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_PRODUCT, productId, "UPDATE",
                 Map.of("name", newName, "strictMatch", strict));
     }
 
@@ -352,7 +353,7 @@ public class ProductDefinitionService {
         }
         productRepository.delete(productId);
         catalog.invalidate(tenantId, product.code());
-        audit.record(tenantId, "PRODUCT", productId, "DELETE", Map.of("code", product.code()));
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_PRODUCT, productId, "DELETE", Map.of("code", product.code()));
     }
 
     @Transactional
@@ -382,7 +383,7 @@ public class ProductDefinitionService {
         productRepository.updateField(updated, time.nowUtc());
         renumberProductFields(tenantId, productId);
         refreshProductHash(tenantId, productId);
-        audit.record(tenantId, "PRODUCT_FIELD", fieldId, "UPDATE",
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_PRODUCT_FIELD, fieldId, "UPDATE",
                 Map.of("productId", productId, "fieldKey", existing.fieldKey()));
         return toProductFieldView(updated, baseField, lookup);
     }
@@ -395,7 +396,7 @@ public class ProductDefinitionService {
         productRepository.deleteField(fieldId);
         renumberProductFields(tenantId, productId);
         refreshProductHash(tenantId, productId);
-        audit.record(tenantId, "PRODUCT_FIELD", fieldId, "DELETE",
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_PRODUCT_FIELD, fieldId, "DELETE",
                 Map.of("productId", productId, "fieldKey", existing.fieldKey()));
     }
 
@@ -419,7 +420,7 @@ public class ProductDefinitionService {
             productRepository.updateFieldOrder(id, order, now);
         }
         refreshProductHash(tenantId, productId);
-        audit.record(tenantId, "PRODUCT", product.id(), "REORDER", Map.of("fieldCount", fieldIds.size()));
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_PRODUCT, product.id(), "REORDER", Map.of("fieldCount", fieldIds.size()));
         return productDetail(tenantId, productId);
     }
 
@@ -460,7 +461,7 @@ public class ProductDefinitionService {
         }
         renumberProductFields(tenantId, productId);
         refreshProductHash(tenantId, productId);
-        audit.record(tenantId, "PRODUCT", productId, "SYNC", Map.of("addMissing", addMissing));
+        audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_PRODUCT, productId, "SYNC", Map.of("addMissing", addMissing));
         return productDetail(tenantId, productId);
     }
 

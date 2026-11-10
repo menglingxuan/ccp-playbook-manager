@@ -90,7 +90,7 @@ public class TestCaseRepository {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("tenantId", tenantId);
         appendFilters(sql, params, filter);
-        sql.append(" ORDER BY c.row_no LIMIT :limit OFFSET :offset");
+        sql.append(orderBy(filter.sort()));
         params.put("limit", filter.page().size());
         params.put("offset", filter.page().offset());
         return jdbc.sql(sql.toString()).params(params).query(this::map).list();
@@ -220,6 +220,28 @@ public class TestCaseRepository {
             sql.append(" AND LOWER(c.search_text) LIKE :query");
             params.put("query", "%" + filter.query().trim().toLowerCase(java.util.Locale.ROOT) + "%");
         }
+    }
+
+    private static String orderBy(String sort) {
+        String key = sort == null || sort.isBlank() ? "row" : sort.trim().toLowerCase(java.util.Locale.ROOT);
+        boolean ascending = key.endsWith("_asc");
+        boolean descending = key.endsWith("_desc");
+        String field = ascending ? key.substring(0, key.length() - 4)
+                : descending ? key.substring(0, key.length() - 5) : key;
+        // the natural row order stays ascending unless a direction is asked for
+        String direction = ascending || (!descending && "row".equals(field)) ? " ASC" : " DESC";
+        String order = switch (field) {
+            case "testcase" -> "c.test_case_id";
+            case "key" -> "c.key_value";
+            case "formulas" -> "c.formula_count";
+            case "updated" -> "c.updated_at";
+            case "row" -> "c.row_no";
+            default -> null;
+        };
+        if (order == null) {
+            return " ORDER BY c.row_no LIMIT :limit OFFSET :offset";
+        }
+        return " ORDER BY " + order + direction + ", c.row_no LIMIT :limit OFFSET :offset";
     }
 
     private static String truncate(String value, int max) {

@@ -1,0 +1,28 @@
+# Production profile: template caching, a larger pool, and the audit trail switched off
+# (the audit entry is hidden and /audit plus /api/audit answer 404).
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 24
+      minimum-idle: 4
+  thymeleaf:
+    cache: true
+
+management:
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  audit:
+    enabled: false
+  resources:
+    # heap and disk figures stay hidden in production
+    heap-metrics-enabled: false
+    disk-metrics-enabled: false
+
+logging:
+  level:
+    root: INFO
+    ac: INFO
+    org.apache.poi: WARN

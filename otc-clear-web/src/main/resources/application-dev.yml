@@ -1,0 +1,27 @@
+# Development / test profile: looser caching and a small pool, audit trail on.
+# Selected by default through spring.profiles.default in application.yml.
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 8
+  thymeleaf:
+    cache: false
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
+app:
+  audit:
+    enabled: true
+  resources:
+    # host level figures are useful while developing and hidden in production
+    heap-metrics-enabled: true
+    disk-metrics-enabled: true
+
+logging:
+  level:
+    root: INFO
+    ac: INFO
+    org.apache.poi: WARN

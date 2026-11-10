@@ -7,8 +7,10 @@ import ac.domain.product.FieldFormatException;
 import ac.domain.table.TableReadException;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -57,6 +59,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ProblemDetail> handleMissingResource(NoResourceFoundException exception) {
         return problem(ErrorCode.NOT_FOUND, "Resource not found: " + exception.getResourcePath());
+    }
+
+    /** Keeps the status of {@code ResponseStatusException} (used to hide switched-off pages). */
+    @ExceptionHandler(ErrorResponseException.class)
+    public ResponseEntity<ProblemDetail> handleStatus(ErrorResponseException exception) {
+        HttpStatus status = HttpStatus.resolve(exception.getStatusCode().value());
+        ErrorCode code = status == HttpStatus.NOT_FOUND ? ErrorCode.NOT_FOUND : ErrorCode.INTERNAL_ERROR;
+        ProblemDetail problem = ProblemDetail.forStatus(exception.getStatusCode());
+        problem.setTitle(code.name());
+        problem.setDetail(exception.getBody().getDetail() == null ? code.name() : exception.getBody().getDetail());
+        problem.setProperty("code", code.name());
+        problem.setProperty("details", Map.of());
+        return ResponseEntity.status(exception.getStatusCode()).body(problem);
     }
 
     @ExceptionHandler(Exception.class)

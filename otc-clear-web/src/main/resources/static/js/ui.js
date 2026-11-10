@@ -436,12 +436,31 @@ export function applyLanguageSelector() {
   select.addEventListener('change', () => setLocale(select.value));
 }
 
+/** Keeps `--topbar-h` in sync so sticky panels sit right below the banner. */
+function trackTopbarHeight() {
+  const topbar = document.querySelector('.topbar');
+  if (!topbar) {
+    return;
+  }
+  const apply = () => {
+    const height = Math.round(topbar.getBoundingClientRect().height);
+    document.documentElement.style.setProperty('--topbar-h', `${height}px`);
+  };
+  apply();
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(apply).observe(topbar);
+  } else {
+    window.addEventListener('resize', apply);
+  }
+}
+
 /** Wires the top bar with runtime context. */
 export async function initShell() {
   await loadMessages();
   applyStoredTheme();
   applyLanguageSelector();
   applyI18n(document);
+  trackTopbarHeight();
   try {
     const ctx = await context();
     const badge = byId('ctxBadge');

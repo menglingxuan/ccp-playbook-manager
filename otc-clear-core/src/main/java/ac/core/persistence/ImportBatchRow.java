@@ -25,8 +25,22 @@ public record ImportBatchRow(
         int totalRows,
         int invalidRows,
         String note,
+        boolean favorite,
+        boolean pinned,
+        String tags,
         String createdBy,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
         LocalDateTime deletedAt) {
+
+    /** Tags of the console, without the matching sentinel characters. */
+    public java.util.List<String> tagList() {
+        if (tags == null || tags.isBlank()) {
+            return java.util.List.of();
+        }
+        return java.util.Arrays.stream(tags.split(","))
+                .map(String::trim)
+                .filter(tag -> !tag.isEmpty())
+                .toList();
+    }
 }

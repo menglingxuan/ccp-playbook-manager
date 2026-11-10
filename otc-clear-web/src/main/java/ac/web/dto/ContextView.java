@@ -11,6 +11,9 @@ import java.util.Map;
  * @param tenantId       bound tenant
  * @param dataRoot       storage root
  * @param version        application version
+ * @param database       database product and version
+ * @param profiles       active spring profiles
+ * @param auditEnabled   whether the audit entry is available
  * @param limits         capability limits shown in the UI
  * @param exportDefaults default CSV options
  * @param products       available products
@@ -20,6 +23,9 @@ public record ContextView(
         String tenantId,
         String dataRoot,
         String version,
+        String database,
+        List<String> profiles,
+        boolean auditEnabled,
         LimitsView limits,
         Map<String, Object> exportDefaults,
         List<ProductView> products) {
