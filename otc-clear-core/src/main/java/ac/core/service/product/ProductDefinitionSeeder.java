@@ -39,9 +39,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductDefinitionSeeder implements ApplicationRunner {
 
     static final String MARKER_KEY = "product.seed.version";
-    static final String MARKER_VALUE = "6";
+    static final String MARKER_VALUE = "7";
 
-    /** Role code of a business column; derived products keep them required. */
+    /** Role code of a business column: it belongs to the trade block but may be optional. */
     static final String BUSINESS_ROLE = "BUSINESS";
 
     static final String MANAGED_ROLE = "MANAGED";
@@ -63,10 +63,6 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
      */
     private static final SeedField REPORT_TIMESTAMP_FIELD =
             SeedField.trade("reportTimestamp", "Report Timestamp", "TEXT", true);
-
-    private static boolean isBusinessRole(String roleCode) {
-        return BUSINESS_ROLE.equalsIgnoreCase(roleCode == null ? "" : roleCode);
-    }
 
     private static boolean isManagedRole(String roleCode) {
         return MANAGED_ROLE.equalsIgnoreCase(roleCode == null ? "" : roleCode);
@@ -98,26 +94,6 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
     private record SeedField(String key, String header, String valueTypeCode, String roleCode,
             boolean required, List<String> aliases, List<String> tags, boolean keyFlag) {
 
-        static SeedField text(String key, String header) {
-            return new SeedField(key, header, "TEXT", "BUSINESS", false, List.of(), List.of(), false);
-        }
-
-        static SeedField text(String key, String header, List<String> aliases) {
-            return new SeedField(key, header, "TEXT", "BUSINESS", false, aliases, List.of(), false);
-        }
-
-        static SeedField tagged(String key, String header, String tag) {
-            return new SeedField(key, header, "TEXT", "BUSINESS", false, List.of(), List.of(tag), false);
-        }
-
-        static SeedField date(String key, String header, boolean required) {
-            return new SeedField(key, header, "DATE", "BUSINESS", required, List.of(), List.of(), false);
-        }
-
-        static SeedField decimal(String key, String header, boolean required, List<String> aliases) {
-            return new SeedField(key, header, "DECIMAL", "BUSINESS", required, aliases, List.of(), false);
-        }
-
         static SeedField keyField() {
             return new SeedField("tradeId", "Trade ID", "TEXT", "BUSINESS", true,
                     List.of("TradeID", "Trade Ref"), List.of(), true);
@@ -146,53 +122,53 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
             SeedField.managed("remarks", "_Remarks"),
             REPORT_TIMESTAMP_FIELD,
             SeedField.keyField(),
-            SeedField.date("tradeDate", "Trade Date", true),
-            SeedField.date("effectiveDate", "Effective Date", false),
-            SeedField.date("maturityDate", "Maturity Date", true),
-            SeedField.decimal("notional", "Notional", true, List.of()),
-            SeedField.text("notionalCurrency", "Notional Currency", List.of("CCY")),
-            SeedField.decimal("fixedRate", "Rate", false, List.of()),
-            SeedField.decimal("floatingRate", "Rate", false, List.of("Floating Rate")),
-            SeedField.text("fixedFrequency", "Fixed Frequency"),
-            SeedField.text("floatingFrequency", "Floating Frequency"),
-            SeedField.text("dayCount", "Day Count", List.of("Day Count Convention")),
-            SeedField.text("businessDayConvention", "BDC", List.of("Business Day Convention")),
-            SeedField.text("paymentCalendar", "Calendar", List.of("Payment Calendar")),
-            SeedField.tagged("clearingHouse", "Clearing House", "CLEARING"),
-            SeedField.tagged("clearingMember", "Clearing Member", "CLEARING"),
-            SeedField.text("account", "Account"),
-            SeedField.text("counterparty", "Counterparty"),
-            SeedField.text("direction", "Direction", List.of("Trade Direction")),
-            SeedField.tagged("upi", "UPI", "REPORT"),
-            SeedField.tagged("reportingParty", "Reporting Party", "REPORT"),
-            SeedField.text("tradeState", "Trade State", List.of("Status")),
-            SeedField.date("novationDate", "Novation Date", false),
-            SeedField.text("portfolio", "Portfolio"),
-            new SeedField("usPerson", "US Person", "BOOLEAN", "BUSINESS", false, List.of(), List.of(), false));
+            SeedField.trade("tradeDate", "Trade Date", "DATE", true),
+            SeedField.trade("effectiveDate", "Effective Date", "DATE", true),
+            SeedField.trade("maturityDate", "Maturity Date", "DATE", true),
+            SeedField.trade("notional", "Notional", "DECIMAL", true),
+            SeedField.trade("notionalCurrency", "Notional Currency", "TEXT", true, "CCY"),
+            SeedField.trade("fixedRate", "Rate", "DECIMAL", true),
+            SeedField.trade("floatingRate", "Rate", "DECIMAL", true, "Floating Rate"),
+            SeedField.trade("fixedFrequency", "Fixed Frequency", "TEXT", true),
+            SeedField.trade("floatingFrequency", "Floating Frequency", "TEXT", true),
+            SeedField.trade("dayCount", "Day Count", "TEXT", true, "Day Count Convention"),
+            SeedField.trade("businessDayConvention", "BDC", "TEXT", true, "Business Day Convention"),
+            SeedField.trade("paymentCalendar", "Calendar", "TEXT", true, "Payment Calendar"),
+            SeedField.tradeTagged("clearingHouse", "Clearing House", "TEXT", true, "CLEARING"),
+            SeedField.tradeTagged("clearingMember", "Clearing Member", "TEXT", true, "CLEARING"),
+            SeedField.trade("account", "Account", "TEXT", true),
+            SeedField.trade("counterparty", "Counterparty", "TEXT", true),
+            SeedField.trade("direction", "Direction", "TEXT", true, "Trade Direction"),
+            SeedField.tradeTagged("upi", "UPI", "TEXT", true, "REPORT"),
+            SeedField.tradeTagged("reportingParty", "Reporting Party", "TEXT", true, "REPORT"),
+            SeedField.trade("tradeState", "Trade State", "TEXT", true, "Status"),
+            SeedField.trade("novationDate", "Novation Date", "DATE", true),
+            SeedField.trade("portfolio", "Portfolio", "TEXT", true),
+            SeedField.trade("usPerson", "US Person", "BOOLEAN", true));
 
     private static final List<SeedField> OIS_FIELDS = List.of(
             SeedField.managed("testCaseId", "_TestCaseId"),
             SeedField.managed("remarks", "_Remarks"),
             SeedField.keyField(),
-            SeedField.date("tradeDate", "Trade Date", true),
-            SeedField.date("effectiveDate", "Effective Date", false),
-            SeedField.date("maturityDate", "Maturity Date", true),
-            SeedField.decimal("notional", "Notional", true, List.of()),
-            SeedField.text("notionalCurrency", "Notional Currency", List.of("CCY")),
-            SeedField.decimal("overnightRate", "Rate", false, List.of("Overnight Rate")),
-            SeedField.text("compoundingMethod", "Compounding", List.of("Compounding Method")),
-            SeedField.text("paymentFrequency", "Payment Frequency"),
-            SeedField.text("dayCount", "Day Count"),
-            SeedField.text("businessDayConvention", "BDC", List.of("Business Day Convention")),
-            SeedField.text("paymentCalendar", "Calendar", List.of("Payment Calendar")),
-            SeedField.tagged("clearingHouse", "Clearing House", "CLEARING"),
-            SeedField.tagged("clearingMember", "Clearing Member", "CLEARING"),
-            SeedField.text("account", "Account"),
-            SeedField.text("counterparty", "Counterparty"),
-            SeedField.text("direction", "Direction"),
-            SeedField.tagged("upi", "UPI", "REPORT"),
-            SeedField.text("tradeState", "Trade State", List.of("Status")),
-            SeedField.text("portfolio", "Portfolio"));
+            SeedField.trade("tradeDate", "Trade Date", "DATE", true),
+            SeedField.trade("effectiveDate", "Effective Date", "DATE", true),
+            SeedField.trade("maturityDate", "Maturity Date", "DATE", true),
+            SeedField.trade("notional", "Notional", "DECIMAL", true),
+            SeedField.trade("notionalCurrency", "Notional Currency", "TEXT", true, "CCY"),
+            SeedField.trade("overnightRate", "Rate", "DECIMAL", true, "Overnight Rate"),
+            SeedField.trade("compoundingMethod", "Compounding", "TEXT", true, "Compounding Method"),
+            SeedField.trade("paymentFrequency", "Payment Frequency", "TEXT", true),
+            SeedField.trade("dayCount", "Day Count", "TEXT", true),
+            SeedField.trade("businessDayConvention", "BDC", "TEXT", true, "Business Day Convention"),
+            SeedField.trade("paymentCalendar", "Calendar", "TEXT", true, "Payment Calendar"),
+            SeedField.tradeTagged("clearingHouse", "Clearing House", "TEXT", true, "CLEARING"),
+            SeedField.tradeTagged("clearingMember", "Clearing Member", "TEXT", true, "CLEARING"),
+            SeedField.trade("account", "Account", "TEXT", true),
+            SeedField.trade("counterparty", "Counterparty", "TEXT", true),
+            SeedField.trade("direction", "Direction", "TEXT", true),
+            SeedField.tradeTagged("upi", "UPI", "TEXT", true, "REPORT"),
+            SeedField.trade("tradeState", "Trade State", "TEXT", true, "Status"),
+            SeedField.trade("portfolio", "Portfolio", "TEXT", true));
 
     /**
      * MW/CCSIRS ships a complete 70 column template: 4 managed columns plus 66 business columns,
@@ -319,8 +295,8 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
 
     /**
      * Brings an existing catalogue up to the current seed version without touching user data: the
-     * field roles are collapsed to business/managed and the MW/CCSIRS template is replaced when the
-     * catalogue still carries the v1 definition.
+     * field roles are collapsed to business/managed, the MW/CCSIRS template is replaced when the
+     * catalogue still carries the v1 definition and the example business fields become required.
      */
     private void upgradeToCurrentVersion(String tenantId, String fromVersion) {
         ensureRoleItems(tenantId);
@@ -330,7 +306,64 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
         ensureSystemManagedFields(tenantId);
         ensureReportTimestampField(tenantId);
         applyColumnMatchingRules(tenantId);
+        requireExampleBusinessFields(tenantId);
         log.info("Upgraded product definitions of tenant {} from seed version {}", tenantId, fromVersion);
+    }
+
+    /**
+     * Seed version 7: a base field now caps the required flag of its derived copies, so the example
+     * business fields of {@code MW/IRS} and {@code MW/OIS} are marked required to keep the strictness
+     * the previous releases enforced on every derived product. Both the base definition and the
+     * existing copies are aligned, and the schema hashes are recomputed because the flag is part of
+     * the canonical definition.
+     */
+    private void requireExampleBusinessFields(String tenantId) {
+        for (BaseProductCode code : List.of(BaseProductCode.IRS, BaseProductCode.OIS)) {
+            baseRepository.findByCode(tenantId, PlatformCode.MW.name(), code.name()).ifPresent(base -> {
+                LocalDateTime now = time.nowUtc();
+                boolean changed = false;
+                for (BaseFieldRow field : baseRepository.listFields(tenantId, base.id())) {
+                    if (isManagedRole(field.roleCode()) || field.required()) {
+                        continue;
+                    }
+                    baseRepository.updateField(requireValue(field), now);
+                    changed = true;
+                }
+                if (!changed) {
+                    return;
+                }
+                ProductSchema schema = schemaMapper.toBaseSchema(base,
+                        baseRepository.listFields(tenantId, base.id()), metaLookup.load(tenantId));
+                baseRepository.updateSchemaHash(base.id(), schema.schemaHash(), now);
+                for (ProductRow product : productRepository.listByBaseProduct(tenantId, base.id())) {
+                    for (ProductFieldRow field : productRepository.listFields(tenantId, product.id())) {
+                        if (isManagedRole(field.roleCode()) || field.required()) {
+                            continue;
+                        }
+                        productRepository.updateField(requireValue(field), now);
+                    }
+                    refreshSchemaHash(tenantId, product);
+                }
+                log.info("Required the example business fields of {}/{}", PlatformCode.MW, code);
+            });
+        }
+    }
+
+    /** Same base field with the required flag set. */
+    private static BaseFieldRow requireValue(BaseFieldRow field) {
+        return new BaseFieldRow(field.id(), field.tenantId(), field.baseProductId(), field.fieldKey(),
+                field.header(), field.displayName(), field.aliases(), field.valueTypeCode(), field.roleCode(),
+                field.tags(), true, field.businessKey(), field.keyFlag(), field.sortOrder(), field.remark(),
+                field.formatHint(), field.clonePattern(), field.validationExpr());
+    }
+
+    /** Same product field with the required flag set. */
+    private static ProductFieldRow requireValue(ProductFieldRow field) {
+        return new ProductFieldRow(field.id(), field.tenantId(), field.productId(), field.baseFieldId(),
+                field.fieldKey(), field.header(), field.displayName(), field.aliases(),
+                field.valueTypeCode(), field.roleCode(), field.tags(), true, field.businessKey(),
+                field.keyFlag(), field.sortOrder(), field.remark(), field.formatHint(),
+                field.clonePattern(), field.validationExpr());
     }
 
     /**
@@ -397,12 +430,12 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
         return row;
     }
 
-    /** Copies one base field into a derived product; business columns stay required there. */
+    /** Copies one base field into a derived product; the required flag follows the base definition. */
     private void insertProductField(String tenantId, String productId, BaseFieldRow baseField, int order) {
         productRepository.insertField(new ProductFieldRow(Ids.newId(), tenantId, productId, baseField.id(),
                 baseField.fieldKey(), baseField.header(), baseField.displayName(), baseField.aliases(),
                 baseField.valueTypeCode(), baseField.roleCode(), baseField.tags(),
-                isBusinessRole(baseField.roleCode()) || baseField.required(), baseField.businessKey(),
+                baseField.required(), baseField.businessKey(),
                 baseField.keyFlag(), order, baseField.remark(), baseField.formatHint(),
                 baseField.clonePattern(), baseField.validationExpr()), time.nowUtc());
     }
@@ -624,8 +657,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
             order++;
             productRepository.insertField(new ProductFieldRow(Ids.newId(), tenantId, productId, field.id(),
                     field.fieldKey(), field.header(), field.displayName(), field.aliases(),
-                    field.valueTypeCode(), field.roleCode(), field.tags(),
-                    isBusinessRole(field.roleCode()) || field.required(),
+                    field.valueTypeCode(), field.roleCode(), field.tags(), field.required(),
                     field.businessKey(), field.keyFlag(), order, field.remark(), field.formatHint(),
                     field.clonePattern(), field.validationExpr()), now);
         }
@@ -652,14 +684,16 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
                         item("CONV_METHOD", "Conversion Method（枚举引用）", "CONV_METHOD")));
         seedSet(tenantId, new MetaRepository.MetaSetRow("FIELD_ROLE", "角色类型", "字段在交易块中的角色", true, 2, "VALUE"),
                 now, List.of(item("BUSINESS", "业务字段", null), item("MANAGED", "管理字段", null)));
-        seedSet(tenantId, new MetaRepository.MetaSetRow("FIELD_TAG", "字段标签", "用于分类与检索的标签", true, 3, "VALUE"),
+        // sample dictionaries the first seed created for the templates; they are ordinary data the user
+        // may rename, extend or delete, so they must not be flagged as built in
+        seedSet(tenantId, new MetaRepository.MetaSetRow("FIELD_TAG", "字段标签", "用于分类与检索的标签", false, 3, "VALUE"),
                 now, List.of(
                         item("CLEARING", "清算", null),
                         item("REPORT", "报文", null),
                         item("RISK", "风险", null),
                         item("CHECK", "核对", null)));
         seedSet(tenantId, new MetaRepository.MetaSetRow("CONV_METHOD", "Conversion Method",
-                "业务日调整方式示例枚举", true, 4, "VALUE"), now, List.of(
+                "业务日调整方式示例枚举", false, 4, "VALUE"), now, List.of(
                 item("MODFOLLOWING", "Modified Following", null),
                 item("FLOWING", "Flowing", null),
                 item("PRECEDING", "Preceding", null)));
@@ -787,8 +821,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
             order++;
             productRepository.insertField(new ProductFieldRow(Ids.newId(), tenantId, product.id(), field.id(),
                     field.fieldKey(), field.header(), field.displayName(), field.aliases(),
-                    field.valueTypeCode(), field.roleCode(), field.tags(),
-                    isBusinessRole(field.roleCode()) || field.required(),
+                    field.valueTypeCode(), field.roleCode(), field.tags(), field.required(),
                     field.businessKey(), field.keyFlag(), order, field.remark(), field.formatHint(),
                     field.clonePattern(), field.validationExpr()), now);
         }

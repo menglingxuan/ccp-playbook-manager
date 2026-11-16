@@ -57,6 +57,11 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>A base product owns the complete field list; a product inherits it and may only drop fields,
  * extend the required flag, reorder fields and adjust tags or remarks.
+ *
+ * <p>The base field decides whether a copy may stay optional: a copy can always be required, but a
+ * base field marked optional is the only case where a copy may be optional as well. Making a base
+ * field required therefore needs every existing copy to be required already, while relaxing a base
+ * field leaves the copies untouched.
  */
 @Slf4j
 @Service
@@ -312,6 +317,9 @@ public class ProductDefinitionService {
         requireFreeOrder(tenantId, baseProductId, order, existing.id());
 
         String normalizedExpr = requireValidationExpr(tenantId, request.validationExpr());
+        if (request.required() && !existing.required()) {
+            requireDerivedFieldsRequired(tenantId, baseProductId, existing);
+        }
         BaseFieldRow updated = new BaseFieldRow(existing.id(), tenantId, baseProductId, spec.fieldKey(),
                 spec.header(), request.displayName(), spec.aliases(), spec.valueTypeCode(), spec.roleCode(),
                 spec.tags(), request.required(), existing.businessKey(), existing.keyFlag(), order,
@@ -428,9 +436,8 @@ public class ProductDefinitionService {
                 .orElseThrow(() -> ApiException.notFound("Field " + fieldId + " does not exist"));
         BaseFieldRow baseField = baseRepository.findField(tenantId, product.baseProductId(),
                 existing.baseFieldId()).orElse(null);
-        if (!isBusinessRole(existing.roleCode()) && baseField != null && baseField.required()
-                && !update.required()) {
-            throw ApiException.invalid("Field '" + existing.fieldKey()
+        if (baseField != null && baseField.required() && !update.required()) {
+            throw ApiException.conflict("Field '" + existing.fieldKey()
                     + "' is required by the base product and cannot be relaxed");
         }
 
@@ -452,7 +459,7 @@ public class ProductDefinitionService {
         ProductFieldRow updated = new ProductFieldRow(existing.id(), tenantId, productId,
                 existing.baseFieldId(), existing.fieldKey(), existing.header(), existing.displayName(),
                 existing.aliases(), existing.valueTypeCode(), existing.roleCode(), update.tags(),
-                isBusinessRole(existing.roleCode()) || update.required(), existing.businessKey(),
+                update.required(), existing.businessKey(),
                 existing.keyFlag(), order, update.remark(), existing.formatHint(), existing.clonePattern(),
                 validationExpr);
         productRepository.updateField(updated, time.nowUtc());
@@ -625,12 +632,14 @@ public class ProductDefinitionService {
     /**
      * Copies the base definition into a derived product field.
      *
-     * <p>The validation expression is inherited: a copy that still holds the previous base expression
-     * (or nothing) follows the base, a copy with its own expression keeps it.
+     * <p>The required flag only ever moves up: a base field marked required forces the copy to be
+     * required, while a copy may stay required after the base field was relaxed. The validation
+     * expression is inherited the same way: a copy that still holds the previous base expression (or
+     * nothing) follows the base, a copy with its own expression keeps it.
      */
     private void propagateToCopy(ProductFieldRow copy, BaseFieldRow baseField, String previousExpression,
             LocalDateTime now) {
-        boolean required = isBusinessRole(baseField.roleCode()) || baseField.required() || copy.required();
+        boolean required = baseField.required() || copy.required();
         boolean inherited = copy.validationExpr() == null || copy.validationExpr().isBlank()
                 || copy.validationExpr().equals(previousExpression == null ? "" : previousExpression);
         ProductFieldRow updated = new ProductFieldRow(copy.id(), copy.tenantId(), copy.productId(),
@@ -645,8 +654,7 @@ public class ProductDefinitionService {
     private ProductFieldRow copyOf(String tenantId, String productId, BaseFieldRow baseField, int sortOrder) {
         return new ProductFieldRow(Ids.newId(), tenantId, productId, baseField.id(), baseField.fieldKey(),
                 baseField.header(), baseField.displayName(), baseField.aliases(), baseField.valueTypeCode(),
-                baseField.roleCode(), baseField.tags(),
-                isBusinessRole(baseField.roleCode()) || baseField.required(), baseField.businessKey(),
+                baseField.roleCode(), baseField.tags(), baseField.required(), baseField.businessKey(),
                 baseField.keyFlag(), sortOrder, baseField.remark(), baseField.formatHint(),
                 baseField.clonePattern(), baseField.validationExpr());
     }
@@ -679,9 +687,28 @@ public class ProductDefinitionService {
         return text;
     }
 
-    /** Business columns are always required in a derived product; managed columns stay configurable. */
-    private static boolean isBusinessRole(String roleCode) {
-        return FieldRole.BUSINESS.name().equalsIgnoreCase(roleCode == null ? "" : roleCode);
+    /**
+     * A base field can only become required while every derived copy is required already: a copy is
+     * never upgraded behind the user's back, the conflict lists the products that still allow an
+     * empty value.
+     */
+    private void requireDerivedFieldsRequired(String tenantId, String baseProductId, BaseFieldRow baseField) {
+        List<String> optionalIn = new ArrayList<>();
+        for (ProductRow product : productRepository.listByBaseProduct(tenantId, baseProductId)) {
+            for (ProductFieldRow copy : productRepository.listFields(tenantId, product.id())) {
+                if (baseField.id().equals(copy.baseFieldId()) && !copy.required()) {
+                    optionalIn.add(product.code());
+                    break;
+                }
+            }
+        }
+        if (!optionalIn.isEmpty()) {
+            throw new ApiException(ErrorCode.CONFLICT,
+                    "Field '" + baseField.header() + "' is still optional in derived products: "
+                            + String.join(", ", optionalIn)
+                            + "; set those product fields to required first",
+                    Map.of("products", optionalIn));
+        }
     }
 
     /** Rejects an order already used by another base product field. */

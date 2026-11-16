@@ -78,13 +78,13 @@ class ExportOverrideTest extends AbstractIntegrationTest {
     void clearingARequiredFieldIsRefusedBeforeTheFileIsWritten() throws IOException {
         Fixture fixture = fixture("OVC");
         Map<String, Object> clear = new LinkedHashMap<>();
-        clear.put("fieldKey", "direction");
+        clear.put("fieldKey", "notional");
         clear.put("mode", "CLEAR");
 
         var response = api.post("/api/exports", api.toJson(payload(fixture.batchId(), List.of(clear))));
         assertThat(response.status()).isEqualTo(400);
         assertThat(response.body()).contains("REQUIRED_VALUE_MISSING");
-        assertThat(caseValue(fixture.caseId(), "direction")).isEqualTo("BUY");
+        assertThat(caseValue(fixture.caseId(), "notional")).isEqualTo("1000000");
     }
 
     @Test

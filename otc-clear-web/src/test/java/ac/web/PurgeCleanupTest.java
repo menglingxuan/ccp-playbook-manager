@@ -162,13 +162,28 @@ class PurgeCleanupTest extends AbstractIntegrationTest {
                 .map(String::valueOf).toList();
     }
 
+    /** Reads one {@code TIMESTAMP} column as the stored UTC wall clock, like the repositories do. */
+    private LocalDateTime queryTimestamp(String sql, Object... params) {
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            bind(statement, params);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getObject(1, LocalDateTime.class) : null;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private boolean uploadFileExists(String uploadId) throws IOException {
-        Object createdAt = query("SELECT created_at FROM import_batch WHERE tenant_id = ? AND upload_id = ?",
-                TENANT, uploadId).stream().findFirst().orElse(null);
-        LocalDate date = createdAt instanceof java.sql.Timestamp stamp
-                ? stamp.toInstant().atZone(ZoneOffset.UTC)
-                        .withZoneSameInstant(ac.core.common.TimeProvider.DISPLAY_ZONE).toLocalDate()
-                : LocalDate.now(ac.core.common.TimeProvider.DISPLAY_ZONE);
+        // the upload folder is named after the display date of the import, so the stored UTC timestamp
+        // has to be converted the same way the writer did; a java.sql.Timestamp would be interpreted in
+        // the JVM default zone and shift the date around midnight
+        LocalDateTime createdAt = queryTimestamp(
+                "SELECT created_at FROM import_batch WHERE tenant_id = ? AND upload_id = ?", TENANT, uploadId);
+        LocalDate date = createdAt == null
+                ? LocalDate.now(ac.core.common.TimeProvider.DISPLAY_ZONE)
+                : createdAt.atZone(ZoneOffset.UTC)
+                        .withZoneSameInstant(ac.core.common.TimeProvider.DISPLAY_ZONE).toLocalDate();
         Path folder = dataLayout.uploadsDir(TENANT, date);
         if (!Files.isDirectory(folder)) {
             return false;

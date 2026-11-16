@@ -574,6 +574,8 @@ function openFieldEditor(field) {
           <option value="false" ${editing && field.required ? '' : 'selected'}>${ui.escapeHtml(t('common.optional'))}</option>
           <option value="true" ${editing && field.required ? 'selected' : ''}>${ui.escapeHtml(t('common.required'))}</option>
         </select>
+        ${editing && !field.required
+    ? `<div class="hint">${ui.escapeHtml(t('products.form.requiredTightenHint'))}</div>` : ''}
       </div>
       <div class="field"><label>${ui.escapeHtml(t('products.form.order'))}</label>
         <input id="ffOrder" type="number" min="1" value="${editing ? field.sortOrder : nextOrder(base.fields)}"></div>
@@ -972,11 +974,8 @@ function openProductFieldEditor(product, field) {
     ui.toast(t('products.lock.actionHint'), 'error');
     return;
   }
-  const businessField = field.roleCode === 'BUSINESS';
-  const requiredLocked = businessField || field.requiredFromBase;
-  const requiredHint = businessField
-    ? t('products.form.businessRequiredHint')
-    : t('products.drawer.requiredLocked');
+  const requiredLocked = Boolean(field.requiredFromBase);
+  const requiredHint = t('products.drawer.requiredLocked');
   const baseField = (state.base ? state.base.fields : []).find((entry) => entry.id === field.baseFieldId);
   const baseExpr = baseField ? baseField.validationExpr : null;
   const inheritedExpr = !baseExpr || baseExpr === field.validationExpr;
@@ -1014,9 +1013,7 @@ function openProductFieldEditor(product, field) {
       return;
     }
     const requiredSelect = modal.root.querySelector('#pfRequired');
-    const required = businessField
-      ? true
-      : requiredSelect.disabled ? field.required : requiredSelect.value === 'true';
+    const required = requiredSelect.disabled ? field.required : requiredSelect.value === 'true';
     const payload = {
       required,
       sortOrder: order,

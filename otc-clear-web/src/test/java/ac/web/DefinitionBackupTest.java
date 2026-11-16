@@ -65,7 +65,7 @@ class DefinitionBackupTest extends AbstractIntegrationTest {
         Map<String, List<List<String>>> sheets = new LinkedHashMap<>();
         sheets.put("META_SET", List.of(
                 List.of(newSet, "New set", "", "false", "90", "VALUE"),
-                List.of("FIELD_TAG", "Field tags", "renamed", "true", "3", "VALUE")));
+                List.of("FIELD_TAG", "Field tags", "renamed", "false", "3", "VALUE")));
         sheets.put("META_ITEM", List.of(
                 List.of(newSet, "A", "Value A", "", "1", "true", "", "alpha", "", ""),
                 List.of("MISSING_SET", "X", "Broken", "", "1", "true", "", "", "", "")));

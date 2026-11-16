@@ -34,6 +34,11 @@ class WorkbookRecalculatorTest {
                 null, null, 1);
     }
 
+    private static FieldDef text(String key) {
+        return FieldDef.of(key, 1, key, List.of(), FieldType.TEXT, FieldRole.BUSINESS, false, false,
+                null, null, 1);
+    }
+
     @Test
     void replacesStaleCachedValuesWithFreshResults() throws IOException {
         Path file = directory.resolve("book.xlsx");
@@ -127,7 +132,7 @@ class WorkbookRecalculatorTest {
     }
 
     @Test
-    void keepsTheStoredValueWhenTheFormulaTextCannotBeRestored() throws IOException {
+    void anUnrestorableFormulaLeavesTheStoredValueToTheCaller() throws IOException {
         Path file = directory.resolve("broken.xlsx");
         try (Workbook workbook = new XSSFWorkbook(); OutputStream out = Files.newOutputStream(file)) {
             Sheet sheet = workbook.createSheet("IRS");
@@ -140,8 +145,55 @@ class WorkbookRecalculatorTest {
                 new WorkbookRecalculator.CaseTarget("case-1", 2, List.of(
                         new WorkbookRecalculator.CellTarget(1, "rate", decimal("rate"), "0.03", "=SUM(")))));
 
-        assertThat(result.values().get("case-1")).containsEntry("rate", "0.03");
-        assertThat(result.warnings()).isNotEmpty();
+        // nothing computed, so the caller keeps the text the case already holds
+        assertThat(result.values().get("case-1")).doesNotContainKey("rate");
+        assertThat(result.warnings()).singleElement().asString().contains("SUM(");
+    }
+
+    @Test
+    void referenceToATextCellKeepsTheTextValue() throws IOException {
+        Path file = directory.resolve("textRef.xlsx");
+        try (Workbook workbook = new XSSFWorkbook(); OutputStream out = Files.newOutputStream(file)) {
+            Sheet sheet = workbook.createSheet("IRS");
+            sheet.createRow(0).createCell(0).setCellValue("Tenor");
+            Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("3M");
+            row.createCell(1).setCellFormula("A2");
+            workbook.write(out);
+        }
+
+        WorkbookRecalculator.Result result = WorkbookRecalculator.recalculate(file, "IRS", List.of(
+                new WorkbookRecalculator.CaseTarget("case-1", 2, List.of(
+                        new WorkbookRecalculator.CellTarget(1, "tenor", text("tenor"), "3M", null),
+                        new WorkbookRecalculator.CellTarget(2, "tenorCopy", text("tenorCopy"), "",
+                                "=A2")))));
+
+        assertThat(result.values().get("case-1")).containsEntry("tenorCopy", "3M");
+        assertThat(result.failed()).isZero();
+        assertThat(result.warnings()).isEmpty();
+    }
+
+    @Test
+    void arithmeticOverATextCellReportsTheExcelErrorAndTheField() throws IOException {
+        Path file = directory.resolve("textMath.xlsx");
+        try (Workbook workbook = new XSSFWorkbook(); OutputStream out = Files.newOutputStream(file)) {
+            Sheet sheet = workbook.createSheet("IRS");
+            sheet.createRow(0).createCell(0).setCellValue("Tenor");
+            Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("3M");
+            row.createCell(1).setCellFormula("A2*1");
+            workbook.write(out);
+        }
+
+        WorkbookRecalculator.Result result = WorkbookRecalculator.recalculate(file, "IRS", List.of(
+                new WorkbookRecalculator.CaseTarget("case-1", 2, List.of(
+                        new WorkbookRecalculator.CellTarget(1, "tenor", text("tenor"), "3M", null),
+                        new WorkbookRecalculator.CellTarget(2, "rate", decimal("rate"), "", "=A2*1")))));
+
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(result.warnings()).singleElement().asString()
+                .contains("rate").contains("#VALUE!");
+        assertThat(result.values().get("case-1")).doesNotContainKey("rate");
     }
 
     @Test

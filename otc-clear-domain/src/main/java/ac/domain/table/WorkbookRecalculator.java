@@ -152,13 +152,14 @@ public final class WorkbookRecalculator {
                                 cellTarget.field(), cell));
                         continue;
                     }
-                    warnings.add("Column " + cellTarget.column() + " of row " + target.sourceRow()
-                            + " kept its stored value: the formula could not be restored");
+                    warnings.add(locate(cellTarget, target.sourceRow())
+                            + " could not be restored: '" + cellTarget.formula() + "' is not a formula"
+                            + " this exporter can evaluate");
                 } else {
                     writeValue(cell, cellTarget);
                 }
-                putIfNotEmpty(caseValues, cellTarget.key(), cellTarget.canonicalText());
             }
+            // only computed cells replace the stored text; every other column keeps the original text
             values.put(target.caseId(), caseValues);
         }
 
@@ -174,19 +175,51 @@ public final class WorkbookRecalculator {
                 String text = text(target.cell(), target.field(), computed);
                 if (text == null) {
                     failed++;
-                    warnings.add("Formula of column " + (target.cell().getColumnIndex() + 1) + " in row "
-                            + (target.cell().getRowIndex() + 1) + " evaluated to an error");
+                    warnings.add(locate(target, target.cell().getRowIndex() + 1)
+                            + " evaluated to " + errorText(computed));
                     continue;
                 }
                 putIfNotEmpty(values.get(target.caseId()), target.fieldKey(), text);
                 evaluated++;
             } catch (RuntimeException e) {
                 failed++;
-                warnings.add("Formula of column " + (target.cell().getColumnIndex() + 1) + " in row "
-                        + (target.cell().getRowIndex() + 1) + " is not supported: " + e.getMessage());
+                warnings.add(locate(target, target.cell().getRowIndex() + 1)
+                        + " is not supported: " + reason(e));
             }
         }
         return new Result(values, evaluated, failed, warnings);
+    }
+
+    /** Excel error code of a computed error cell, for instance {@code #VALUE!}. */
+    private static String errorText(CellValue value) {
+        return FormulaError.forInt((byte) value.getErrorValue()).getString();
+    }
+
+    /**
+     * Deepest message of a failed evaluation: POI wraps the real reason (unknown function, numeric
+     * coercion over a text cell, missing sheet) in generic "Error evaluating cell" exceptions.
+     */
+    private static String reason(Throwable error) {
+        Throwable root = error;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        String message = root.getMessage();
+        return message == null || message.isBlank() ? root.getClass().getSimpleName() : message;
+    }
+
+    /** Human readable position of a formula cell, including the field header when known. */
+    private static String locate(CellTarget target, int row) {
+        return locate(target.column(), row, target.field());
+    }
+
+    private static String locate(ValidationTarget target, int row) {
+        return locate(target.cell().getColumnIndex() + 1, row, target.field());
+    }
+
+    private static String locate(int column, int row, FieldDef field) {
+        return "Formula of column " + column + " in row " + row
+                + (field == null ? "" : " (" + field.header() + ")");
     }
 
     private static boolean writeFormula(Cell cell, CellTarget target) {
@@ -235,7 +268,8 @@ public final class WorkbookRecalculator {
         return switch (type) {
             case STRING -> value.getStringValue();
             case NUMERIC -> numberText(cell, field, value.getNumberValue());
-            case BOOLEAN -> Boolean.toString(value.getBooleanValue());
+            // Excel displays boolean results as TRUE / FALSE
+            case BOOLEAN -> value.getBooleanValue() ? "TRUE" : "FALSE";
             case ERROR -> null;
             default -> "";
         };

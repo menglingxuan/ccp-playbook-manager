@@ -216,7 +216,8 @@ public final class ExcelTableReader {
         return switch (type) {
             case STRING -> cell.getStringCellValue();
             case NUMERIC -> numericText(cell);
-            case BOOLEAN -> Boolean.toString(cell.getBooleanCellValue());
+            // Excel shows boolean cells as TRUE / FALSE, so the original text keeps that spelling
+            case BOOLEAN -> cell.getBooleanCellValue() ? "TRUE" : "FALSE";
             case ERROR -> FormulaError.forInt(cell.getErrorCellValue()).getString();
             case BLANK, _NONE -> "";
             default -> "";

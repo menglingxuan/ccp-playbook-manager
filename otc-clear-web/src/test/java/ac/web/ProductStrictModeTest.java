@@ -9,7 +9,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
-/** Strict matching switch, unique field order and the required business fields of products. */
+/** Strict matching switch, unique field order and the required flag inherited by products. */
 class ProductStrictModeTest extends AbstractIntegrationTest {
 
     private static final List<String> FIELDS = List.of("testCaseId", "remarks", "tradeId", "tradeDate",
@@ -155,7 +155,7 @@ class ProductStrictModeTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void productInheritsEveryBaseFieldAndRequiresTheBusinessOnes() {
+    void productInheritsEveryBaseFieldAndItsRequiredFlag() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String baseId = baseIdOf("MW", "OIS");
         String productCode = "OIS_FULL_" + suffix;
@@ -169,28 +169,19 @@ class ProductStrictModeTest extends AbstractIntegrationTest {
         JsonNode fields = api.get("/api/catalog/products/" + productId).json().get("fields");
         assertThat(fields).hasSize(22);
         for (JsonNode field : fields) {
-            if (!"BUSINESS".equals(field.get("roleCode").asString())) {
-                continue;
-            }
             assertThat(field.get("required").asBoolean())
-                    .as("business field %s must be required", field.get("fieldKey").asString())
-                    .isTrue();
+                    .as("field %s inherits the required flag of the base definition",
+                            field.get("fieldKey").asString())
+                    .isEqualTo(field.get("requiredFromBase").asBoolean());
         }
-
-        JsonNode optional = null;
+        // the shipped OIS template marks every business column required
         for (JsonNode field : fields) {
-            if ("BUSINESS".equals(field.get("roleCode").asString())
-                    && !field.get("requiredFromBase").asBoolean()) {
-                optional = field;
-                break;
+            if ("BUSINESS".equals(field.get("roleCode").asString())) {
+                assertThat(field.get("required").asBoolean())
+                        .as("business field %s is required", field.get("fieldKey").asString())
+                        .isTrue();
             }
         }
-        assertThat(optional).isNotNull();
-        int currentOrder = optional.get("sortOrder").asInt();
-        var relaxed = api.patch("/api/catalog/products/" + productId + "/fields/" + optional.get("id").asString(),
-                api.toJson(Map.of("required", false, "sortOrder", currentOrder, "tags", List.of(), "remark", "")));
-        assertThat(relaxed.ok()).as(relaxed.body()).isTrue();
-        assertThat(relaxed.json().get("required").asBoolean()).isTrue();
     }
 
     @Test

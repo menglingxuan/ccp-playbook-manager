@@ -89,6 +89,10 @@ public final class FieldCodec {
         if (value instanceof Number number) {
             return new BigDecimal(number.toString()).toPlainString();
         }
+        // booleans keep the Excel spelling so an edited value reads like the imported one
+        if (value instanceof Boolean flag) {
+            return flag ? "TRUE" : "FALSE";
+        }
         return String.valueOf(value);
     }
 

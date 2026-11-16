@@ -54,7 +54,7 @@
 | GET | `/api/catalog/products/{id}` | 产品 + 字段（含是否继承必填） |
 | PATCH | `/api/catalog/products/{id}` | `{name, description, strictMatch}`；字段为 `null` 时保持原值 |
 | DELETE | `/api/catalog/products/{id}` | 被有效批次或用例引用时返回 409（软删的批次与用例不计入占用） |
-| PATCH | `/api/catalog/products/{id}/fields/{fieldId}` | `{required, sortOrder, tags, remark, validationExpr}`；业务字段的 `required` 恒为 true；`validationExpr` 为 `null` 时保持原值、空串表示恢复继承基产品的表达式 |
+| PATCH | `/api/catalog/products/{id}/fields/{fieldId}` | `{required, sortOrder, tags, remark, validationExpr}`；`required=false` 只在基产品同名字段也是选填时允许（否则 `409`），`required=true` 始终允许；`validationExpr` 为 `null` 时保持原值、空串表示恢复继承基产品的表达式 |
 | DELETE | `/api/catalog/products/{id}/fields/{fieldId}` | 从产品中移除该字段 |
 | POST | `/api/catalog/products/{id}/fields/reorder` | `{fieldIds:[...]}`，产品独立序号 1..N |
 | POST | `/api/catalog/products/{id}/sync` | `{addMissing}`，同步基产品字段变化 |
@@ -82,7 +82,10 @@
 `roleCode` 只有两项：`BUSINESS`（业务字段，参与交易块映射与必填校验）、`MANAGED`（管理字段，可选或必填，
 只有声明过的管理字段才会被识别为管理列）。业务键（Trade ID）由内部 `key_flag` 标记维护，不再作为角色出现。
 
-派生产品继承全部字段，且所有 `BUSINESS` 字段恒为必填；`sortOrder` 不能与同一定义中的其他字段重复（冲突返回 `409`）。
+派生产品继承全部字段，`required` 以基产品为准：基产品必填的字段在派生产品中只能是必填（改为选填返回 `409`），
+基产品选填的字段在派生产品中可保持选填，也可升级为必填；基产品把选填改为必填时，若任一派生产品的同名字段仍为选填，
+`PATCH /api/catalog/base-products/{id}/fields/{fieldId}` 返回 `409` 并在消息中列出这些产品，基产品把必填改为选填不影响派生产品当前设置。
+`sortOrder` 不能与同一定义中的其他字段重复（冲突返回 `409`）。
 
 `strictMatch` 为 true 时，导入按**位置**匹配：从「定义起始列号」开始，定义区必须与产品的**全部字段**
 （`BUSINESS` + `MANAGED`，按声明顺序）顺序、数量、列名完全一致，否则返回 `STRICT_ORDER_MISMATCH`
@@ -94,7 +97,9 @@
 出厂种子：`MW / IRS` 27 个字段（`_TestCaseId`、`_Remarks` + 25 业务字段，交易块首列为必填的 `Report Timestamp`）、
 `MW / OIS` 22 个字段（`_TestCaseId`、`_Remarks` + 20 业务字段）、`MW / CCSIRS` 70 个字段（4 个 `MANAGED` 字段
 `_TestCaseId`、`_Remarks`、`Scenario Group`、`Priority` + 66 个业务字段，其中前 50 个为必填）。
-种子版本升到 `6`：已有库启动时会自动把 `Report Timestamp` 补到 `MW/IRS` 基产品与其派生产品的第 3 位。
+种子版本 `6`：已有库启动时会自动把 `Report Timestamp` 补到 `MW/IRS` 基产品与其派生产品的第 3 位。
+种子版本 `7`：`MW/IRS`、`MW/OIS` 的示例业务字段全部标记为必填（对齐上一版「派生产品业务字段恒必填」的实际行为），
+已有库启动时同步基产品与其派生产品副本的 `required_flag` 并重算 `schema_hash`；`MW/CCSIRS` 的 50 必填 / 16 选填模板保持不变。
 
 ## 元数据
 
@@ -109,10 +114,10 @@
 | GET | `/api/meta/sets/{code}/items` | 单个集合的枚举值（批量更新对话框按集合取新值时使用）；返回值带 `readonly`，为 `true` 表示业务处理依赖该取值，界面不提供编辑 / 删除 |
 | POST | `/api/meta/sets` | `{code, name, description, sortOrder?, type?}`；`type` 缺省为 `VALUE`，`sortOrder` 省略时追加到末尾 |
 | PATCH | `/api/meta/sets/{code}` | 更新集合（含 `type`）；`sortOrder` / `type` 为 `null` 时保持原值 |
-| DELETE | `/api/meta/sets/{code}` | 内置集合、被其他集合引用、或（`VALIDATION` 集合）规则被字段表达式引用时返回 400 / 409 |
+| DELETE | `/api/meta/sets/{code}` | **内置集合**（仅 `VALUE_TYPE` / `FIELD_ROLE`）返回 400；被其他集合的取值通过「引用集合」指向、集合内任一取值被字段定义使用、或（`VALIDATION` 集合）规则被字段表达式引用时返回 409。`FIELD_TAG` / `CONV_METHOD` 是种子写入的示例字典，已标记为非内置，可改名或删除 |
 | POST | `/api/meta/sets/{code}/items` | `{code, label, refSetCode, sortOrder, enabled, remark, content, ruleType}`；`content` 为值文本（`VALUE`）、公式（`FORMULA`，须以 `=` 开头）或校验表达式（`VALIDATION`，`ruleType` 为 `REGEX` / `WILDCARD`，编译失败返回 400；`severity` 为 `WARN`（默认）/ `ERROR`，其他值返回 400，非 `VALIDATION` 集合恒为 `WARN`）；`sortOrder`/`enabled` 省略时追加、默认启用；序号重复或规则码已存在（跨 `VALIDATION` 集合唯一）返回 409 |
 | PATCH | `/api/meta/sets/{code}/items/{itemCode}` | 更新枚举值（含 `content` / `ruleType` / `severity`）；`sortOrder` / `enabled` 为 `null` 时保持原值，序号重复返回 409；`VALUE_TYPE` 的必须取值（`TEXT`/`INTEGER`/`DECIMAL`/`DATE`/`TIME`/`DATETIME`/`BOOLEAN`）与 `FIELD_ROLE` 的 `BUSINESS`/`MANAGED` 不可编辑，返回 409 |
-| DELETE | `/api/meta/sets/{code}/items/{itemCode}` | 被字段定义引用时返回 409；上面列出的必须取值同样返回 409 |
+| DELETE | `/api/meta/sets/{code}/items/{itemCode}` | 被字段定义引用时返回 409（`FIELD_TAG` 的取值按「引用该标签的字段数」计数）；上面列出的必须取值同样返回 409 |
 
 ## 定义备份与还原
 
@@ -287,9 +292,11 @@
 标记与提醒；CSV 文件本身不写入任何标记，可原样回导。
 
 `recalculateFormulas` 缺省为 `true`：导出前用批次的不可变基线工作簿重算公式，公式字段输出重算后的值
-（当前用例值先按 Excel 原生类型写回对应单元格，未导入的行与辅助列沿用基线原值）。求值失败的单元格保留
-用例存储值，并在 `ExportResult.warnings` 中给出 `FORMULA_RECALC_WARNING` / `FORMULA_RECALC_INCOMPLETE` /
-`FORMULA_RECALC_SKIPPED` 说明；预检接口返回的 `sampleRow` 同样是重算后的值。
+（当前用例值先按 Excel 原生类型写回对应单元格，未导入的行与辅助列沿用基线原值）。**求值失败即拒绝导出**：
+`POST /api/exports` 返回 `400`，`details.issues[].code = FORMULA_RECALC_FAILED`，消息包含列号、行号、字段列名与
+Excel 错误码或 POI 的不支持原因；预检接口同样把这些记为 ERROR（`valid=false`）并给出 `sampleRow`（重算后的值）。
+跨多个批次或基线缺失导致未重算时只给 `FORMULA_RECALC_SKIPPED` 警告，导出照常。传 `recalculateFormulas=false`
+可跳过重算、直接输出用例存储值。
 
 ## 产出
 

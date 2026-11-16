@@ -36,8 +36,8 @@ public abstract class AbstractIntegrationTest {
     /**
      * Creates a derived product that keeps only the given base fields.
      *
-     * <p>Derived products require every business field, so partial import fixtures need a product
-     * whose field set matches the file.
+     * <p>A derived product inherits the base field definitions, so partial import fixtures need a
+     * product whose field set matches the file.
      *
      * @return product code of the new product
      */

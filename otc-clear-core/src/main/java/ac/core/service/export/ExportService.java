@@ -184,6 +184,17 @@ public class ExportService {
 
         List<ValidationIssue> issues = new ArrayList<>();
         ResolvedCase resolved = resolve(tenantId, request, selection, issues);
+        // a formula that cannot be recomputed blocks the run; the precheck above only sees the
+        // stored values, so the recalculation errors are checked here, before anything is written
+        List<ValidationIssue> recalculationErrors = issues.stream()
+                .filter(issue -> issue.level() == ac.domain.casefile.IssueLevel.ERROR)
+                .toList();
+        if (!recalculationErrors.isEmpty()) {
+            throw new ApiException(ac.core.common.ErrorCode.INVALID_REQUEST,
+                    "Formulas could not be recalculated",
+                    Map.of("issues", recalculationErrors,
+                            "hint", "Turn formula recalculation off to export the stored values"));
+        }
         CsvContent content = content(selection, resolved);
         List<String> headers = content.headers();
         List<List<String>> rows = content.rows();
@@ -646,11 +657,13 @@ public class ExportService {
         List<WorkbookRecalculator.CaseTarget> targets = caseTargets(selection, batch, overlay);
         WorkbookRecalculator.Result result = WorkbookRecalculator.recalculate(baseline,
                 batch.sheetName(), targets);
+        // a formula that cannot be recomputed must not silently fall back to the value cached by the
+        // source file: the export is refused instead, and the caller can switch recalculation off to
+        // export the stored values on purpose
         result.warnings().stream().limit(20).forEach(message -> issues.add(
-                ValidationIssue.warn("FORMULA_RECALC_WARNING", message)));
+                ValidationIssue.error("FORMULA_RECALC_FAILED", message)));
         if (result.failed() > 0) {
-            issues.add(ValidationIssue.warn("FORMULA_RECALC_INCOMPLETE",
-                    result.failed() + " formula cell(s) could not be recalculated and keep their stored value"));
+            log.info("{} formula cell(s) of batch {} could not be recalculated", result.failed(), batchId);
         }
         if (result.evaluated() > 0) {
             log.info("Recalculated {} formula cell(s) for batch {}", result.evaluated(), batchId);

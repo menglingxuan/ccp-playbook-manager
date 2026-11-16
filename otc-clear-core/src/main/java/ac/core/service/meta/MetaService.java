@@ -347,12 +347,14 @@ public class MetaService {
         List<FieldReference> fields = new ArrayList<>();
         for (BaseProductRepository.BaseProductRow base : baseProducts.listAll(tenantId)) {
             for (BaseProductRepository.BaseFieldRow field : baseProducts.listFields(tenantId, base.id())) {
-                fields.add(new FieldReference(field.valueTypeCode(), field.roleCode(), field.validationExpr()));
+                fields.add(new FieldReference(field.valueTypeCode(), field.roleCode(), field.tags(),
+                        field.validationExpr()));
             }
         }
         for (ProductRepository.ProductRow product : products.listAll(tenantId)) {
             for (ProductRepository.ProductFieldRow field : products.listFields(tenantId, product.id())) {
-                fields.add(new FieldReference(field.valueTypeCode(), field.roleCode(), field.validationExpr()));
+                fields.add(new FieldReference(field.valueTypeCode(), field.roleCode(), field.tags(),
+                        field.validationExpr()));
             }
         }
         for (FieldReference field : fields) {
@@ -361,6 +363,11 @@ public class MetaService {
             }
             if (field.roleCode() != null) {
                 usage.merge(FIELD_ROLE_SET + "/" + field.roleCode(), 1L, Long::sum);
+            }
+            // a tag lives only on the field, so removing its value would leave the field with a tag that
+            // no longer exists and can no longer be saved
+            for (String tag : field.tags()) {
+                usage.merge(FIELD_TAG_SET + "/" + tag, 1L, Long::sum);
             }
             if (field.validationExpr() == null || field.validationExpr().isBlank()) {
                 continue;
@@ -380,7 +387,8 @@ public class MetaService {
     }
 
     /** Values of a field that can reference a meta item. */
-    private record FieldReference(String valueTypeCode, String roleCode, String validationExpr) {
+    private record FieldReference(String valueTypeCode, String roleCode, List<String> tags,
+            String validationExpr) {
     }
 
     private String normalizeRef(String tenantId, String refSetCode, String ownSetCode) {
