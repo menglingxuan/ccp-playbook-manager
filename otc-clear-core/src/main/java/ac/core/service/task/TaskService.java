@@ -1,10 +1,14 @@
 package ac.core.service.task;
 
 import ac.core.common.ApiException;
+import ac.core.common.Notes;
 import ac.core.common.ErrorCode;
 import ac.core.common.PageQuery;
 import ac.core.common.PageResult;
 import ac.core.persistence.BatchFilter;
+import ac.core.persistence.ExportJobRepository;
+import ac.core.persistence.ExportJobRow;
+import ac.core.persistence.ExternalOutputRepository;
 import ac.core.persistence.ImportBatchRepository;
 import ac.core.persistence.ImportBatchRow;
 import ac.core.persistence.ImportTaskRepository;
@@ -14,6 +18,8 @@ import ac.core.common.JsonSupport;
 import ac.core.common.TimeProvider;
 import ac.core.persistence.TestCaseRepository;
 import ac.core.service.DataLayout;
+import ac.core.service.importflow.SheetCache;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -21,10 +27,13 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,19 +51,28 @@ public class TaskService {
     private final ImportTaskRepository taskRepository;
     private final ImportBatchRepository batchRepository;
     private final TestCaseRepository caseRepository;
+    private final ExportJobRepository exportRepository;
+    private final ExternalOutputRepository externalOutputs;
+    private final SheetCache sheetCache;
     private final JsonSupport json;
     private final TimeProvider time;
     private final DataLayout dataLayout;
+    private final ac.core.service.baseline.BaselineStore baselines;
 
     public TaskService(ImportTaskRepository taskRepository, ImportBatchRepository batchRepository,
-            TestCaseRepository caseRepository, JsonSupport json, TimeProvider time,
-            DataLayout dataLayout) {
+            TestCaseRepository caseRepository, ExportJobRepository exportRepository,
+            ExternalOutputRepository externalOutputs, SheetCache sheetCache, JsonSupport json,
+            TimeProvider time, DataLayout dataLayout, ac.core.service.baseline.BaselineStore baselines) {
         this.taskRepository = taskRepository;
         this.batchRepository = batchRepository;
         this.caseRepository = caseRepository;
+        this.exportRepository = exportRepository;
+        this.externalOutputs = externalOutputs;
+        this.sheetCache = sheetCache;
         this.json = json;
         this.time = time;
         this.dataLayout = dataLayout;
+        this.baselines = baselines;
     }
 
     /**
@@ -112,6 +130,17 @@ public class TaskService {
                     path, path != null && Files.isRegularFile(Path.of(path))));
         }
         return extras;
+    }
+
+    /** Replaces the remark of one task; an empty text clears it. */
+    @Transactional
+    public String updateNote(String tenantId, String taskId, String rawNote) {
+        taskRepository.find(tenantId, taskId)
+                .filter(row -> !"DELETED".equals(row.status()))
+                .orElseThrow(() -> ApiException.notFound("Task " + taskId + " does not exist"));
+        String note = Notes.normalize(rawNote);
+        taskRepository.updateNote(tenantId, taskId, note);
+        return note;
     }
 
     /** Renames a task; the name stays unique inside the tenant and is capped at 256 characters. */
@@ -176,26 +205,108 @@ public class TaskService {
         return new PageResult<>(items, filter.page().page(), filter.page().size(), total);
     }
 
-    public Map<String, Integer> statusSummary(String tenantId) {
+    /**
+     * Task counts per status for the tasks that match the given filter.
+     *
+     * <p>The status of the filter itself is ignored, and the remaining predicates (kind, product,
+     * search text, date range) are the ones the list uses, so every card reports exactly the number of
+     * rows a click on it shows. Only statuses that an import can actually end up in are reported: a
+     * commit is one transaction, so a queued or running task is never visible from outside it.
+     *
+     * @param tenantId tenant scope
+     * @param filter   filter whose status clause is ignored
+     * @return status to count, in a stable display order
+     */
+    public Map<String, Integer> statusSummary(String tenantId, TaskFilter filter) {
         Map<String, Integer> counts = new LinkedHashMap<>();
-        counts.put("PENDING", 0);
-        counts.put("RUNNING", 0);
-        counts.put("SUCCEEDED", 0);
-        counts.put("PARTIAL", 0);
-        counts.put("FAILED", 0);
-        taskRepository.statusCounts(tenantId).forEach(item ->
+        for (String status : List.of("RUNNING", "SUCCEEDED", "PARTIAL", "FAILED")) {
+            counts.put(status, 0);
+        }
+        taskRepository.statusCounts(tenantId, filter).forEach(item ->
                 counts.put(String.valueOf(item.get("status")), ((Number) item.get("total")).intValue()));
         return counts;
     }
 
+    /**
+     * Purges a task: its batches, the cases inside them, the export history of those batches and every
+     * file only this task referred to.
+     *
+     * <p>A task delete is not a reversible soft delete, so the rows are physically removed instead of
+     * being marked {@code DELETED}: nothing in the database or on disk keeps pointing at the removed
+     * data. Files that another batch still uses (an upload imported twice) are kept.
+     *
+     * @param tenantId tenant scope
+     * @param taskId   task to remove
+     */
     @Transactional
     public void delete(String tenantId, String taskId) {
-        ImportTaskRow task = taskRepository.find(tenantId, taskId)
-                .orElseThrow(() -> ac.core.common.ApiException.notFound("Task " + taskId + " does not exist"));
-        LocalDateTime now = time.nowUtc();
-        caseRepository.softDeleteByTask(tenantId, taskId, now);
-        batchRepository.softDeleteByTask(tenantId, taskId, now);
-        taskRepository.softDelete(tenantId, taskId);
+        taskRepository.find(tenantId, taskId)
+                .orElseThrow(() -> ApiException.notFound("Task " + taskId + " does not exist"));
+        // a batch that was already deleted on its own is part of the task and goes with it
+        List<ImportBatchRow> batches = batchRepository.listByTaskForPurge(tenantId, taskId);
+        List<String> batchIds = batches.stream().map(ImportBatchRow::id).toList();
+
+        // the export history of these batches belongs to the task: records and archived CSV go as well
+        for (ExportJobRow job : exportRepository.listByBatchIds(tenantId, batchIds)) {
+            deleteExportFile(tenantId, job);
+            exportRepository.delete(tenantId, job.id());
+        }
+        // an external output keeps its record, only the pointer at the removed batch is cleared
+        externalOutputs.detachBatches(tenantId, batchIds);
+        caseRepository.purgeByBatches(tenantId, batchIds);
+        batchRepository.purgeByTask(tenantId, taskId);
+        taskRepository.purge(tenantId, taskId);
+
+        // baselines are only reachable through their batch; uploads may be shared with another task
+        batches.forEach(batch -> baselines.delete(tenantId, batch.id()));
+        purgeUploads(tenantId, batches);
+    }
+
+    /** Removes the archived file of one export record, if it is still there. */
+    private void deleteExportFile(String tenantId, ExportJobRow job) {
+        try {
+            Files.deleteIfExists(dataLayout.resolveInside(dataLayout.tenantRoot(tenantId), job.storagePath()));
+        } catch (IOException | RuntimeException e) {
+            log.warn("Cannot delete the export file of {}: {}", job.id(), e.toString());
+        }
+    }
+
+    /**
+     * Deletes the upload files that no remaining batch refers to and drops them from the preview cache.
+     *
+     * @param tenantId tenant scope
+     * @param batches  batches that were just removed
+     */
+    private void purgeUploads(String tenantId, List<ImportBatchRow> batches) {
+        Set<String> handled = new HashSet<>();
+        for (ImportBatchRow batch : batches) {
+            String uploadId = batch.uploadId();
+            if (uploadId == null || uploadId.isBlank() || !handled.add(uploadId)) {
+                continue;
+            }
+            // the parsed sheets of that upload must not outlive it in memory
+            sheetCache.evict(uploadId);
+            if (batchRepository.countByUploadId(tenantId, uploadId) > 0) {
+                // another task imported from the same upload, so its source file has to stay
+                continue;
+            }
+            LocalDate uploadDate = batch.createdAt().atZone(ZoneOffset.UTC)
+                    .withZoneSameInstant(TimeProvider.DISPLAY_ZONE).toLocalDate();
+            Path directory = dataLayout.uploadsDir(tenantId, uploadDate);
+            String prefix = uploadId + ".";
+            try (Stream<Path> files = Files.list(directory)) {
+                files.filter(path -> path.getFileName().toString().startsWith(prefix)).forEach(path -> {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (IOException e) {
+                        log.warn("Cannot delete the upload file {}: {}", path, e.toString());
+                    }
+                });
+            } catch (IOException e) {
+                // the day folder may already be gone; nothing to clean then
+                log.debug("No upload files to clean for {}: {}", uploadId, e.toString());
+            }
+        }
     }
 
     public PageResult<ImportTaskRow> recent(String tenantId, int limit) {

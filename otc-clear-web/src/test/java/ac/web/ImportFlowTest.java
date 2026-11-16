@@ -2,6 +2,7 @@ package ac.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +61,9 @@ class ImportFlowTest extends AbstractIntegrationTest {
         var task = api.get("/api/tasks/" + taskId);
         assertThat(task.ok()).isTrue();
         assertThat(task.json().get("task").get("sourceName").asString()).startsWith("irs_");
+        // the file content hash is recorded at import time and shown on the task page
+        assertThat(task.json().get("task").get("sourceMd5").asString())
+                .isEqualTo(md5(csv.getBytes(StandardCharsets.UTF_8)));
 
         var cases = api.get("/api/batches/" + batchId + "/cases?page=1&size=50");
         assertThat(cases.ok()).isTrue();
@@ -134,7 +138,8 @@ class ImportFlowTest extends AbstractIntegrationTest {
         String csvText = new String(api.getBytes("/api/exports/" + exportJson.get("exportId").asString()
                 + "/download"), StandardCharsets.UTF_8);
         assertThat(csvText).startsWith("\"_TestCaseId\";");
-        assertThat(csvText).contains("1500000.00");
+        // the export writes the original cell text, not a type-normalized rendering
+        assertThat(csvText).contains("\"1,500,000.00\"");
         assertThat(csvText.split("\r\n")).hasSize(3);
     }
 
@@ -533,6 +538,88 @@ class ImportFlowTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void importsIntoAnExistingTaskWhenANameIsGiven() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", List.of("testCaseId", "remarks", "tradeId",
+                "tradeDate", "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction"));
+        String taskName = "合并任务 " + suffix;
+
+        // the requested name is used for the task created by the first import
+        JsonNode first = importNamed("join_a_" + suffix, "JTA-" + suffix, productCode, taskName);
+        assertThat(first.get("status").asString()).isEqualTo("SUCCEEDED");
+        assertThat(first.get("joined").asBoolean()).isFalse();
+        assertThat(first.get("taskName").asString()).isEqualTo(taskName);
+        String taskId = first.get("taskId").asString();
+
+        JsonNode taskAfterFirst = api.get("/api/tasks/" + taskId).json().get("task");
+        assertThat(taskAfterFirst.get("name").asString()).isEqualTo(taskName);
+        assertThat(taskAfterFirst.get("batchCount").asInt()).isEqualTo(1);
+        int rowsAfterFirst = taskAfterFirst.get("totalRows").asInt();
+
+        // the second import with the same name appends to that task instead of creating a new one
+        JsonNode second = importNamed("join_b_" + suffix, "JTB-" + suffix, productCode, taskName);
+        assertThat(second.get("status").asString()).isEqualTo("SUCCEEDED");
+        assertThat(second.get("joined").asBoolean()).isTrue();
+        assertThat(second.get("taskId").asString()).isEqualTo(taskId);
+
+        JsonNode taskAfterSecond = api.get("/api/tasks/" + taskId).json().get("task");
+        assertThat(taskAfterSecond.get("batchCount").asInt()).isEqualTo(2);
+        assertThat(taskAfterSecond.get("totalRows").asInt()).isEqualTo(rowsAfterFirst * 2);
+        // appending must not leave the task behind in RUNNING: it keeps a real, final status
+        assertThat(taskAfterSecond.get("status").asString()).isEqualTo("SUCCEEDED");
+        assertThat(taskAfterSecond.get("finishedAt").asString()).isNotBlank();
+        assertThat(api.get("/api/tasks/" + taskId).json().get("batches")).hasSize(2);
+        assertThat(api.get("/api/tasks?q=" + URLEncoder.encode(taskName, StandardCharsets.UTF_8))
+                .json().get("total").asInt()).isEqualTo(1);
+
+        // a task id works as well and resolves to the same task
+        JsonNode byId = importNamed("join_d_" + suffix, "JTD-" + suffix, productCode, taskId);
+        assertThat(byId.get("joined").asBoolean()).isTrue();
+        assertThat(byId.get("taskId").asString()).isEqualTo(taskId);
+        assertThat(byId.get("taskName").asString()).isEqualTo(taskName);
+        assertThat(api.get("/api/tasks/" + taskId).json().get("task").get("batchCount").asInt()).isEqualTo(3);
+
+        // an unknown id is reported instead of being turned into a task name
+        var unknownUpload = upload("join_e_" + suffix, "JTE-" + suffix, productCode);
+        var unknown = api.post("/api/imports", api.toJson(Map.of(
+                "uploadId", unknownUpload, "force", false,
+                "taskName", "00000000-0000-0000-0000-000000000000",
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
+        assertThat(unknown.status()).isEqualTo(404);
+
+        // deleting a task removes it for good, so its name is free again
+        api.delete("/api/tasks/" + taskId);
+        assertThat(api.get("/api/tasks/" + taskId).status()).isEqualTo(404);
+        var uploadId = upload("join_c_" + suffix, "JTC-" + suffix, productCode);
+        var reused = api.post("/api/imports", api.toJson(Map.of(
+                "uploadId", uploadId, "force", true, "taskName", taskName,
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
+        assertThat(reused.ok()).as(reused.body()).isTrue();
+        assertThat(reused.json().get("joined").asBoolean()).isFalse();
+        assertThat(reused.json().get("taskId").asString()).isNotEqualTo(taskId);
+        api.delete("/api/tasks/" + reused.json().get("taskId").asString());
+    }
+
+    /** Imports the CSV under the given task name and returns the import response. */
+    private JsonNode importNamed(String fileName, String tradeId, String productCode, String taskName) {
+        var imported = api.post("/api/imports", api.toJson(Map.of(
+                "uploadId", upload(fileName, tradeId, productCode), "force", false, "taskName", taskName,
+                "sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)))));
+        assertThat(imported.ok()).as(imported.body()).isTrue();
+        return imported.json();
+    }
+
+    private String upload(String fileName, String tradeId, String productCode) {
+        String csv = CSV_TEMPLATE.formatted(tradeId, tradeId);
+        var upload = api.upload("/api/uploads", fileName + ".csv", csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(upload.ok()).as(upload.body()).isTrue();
+        String uploadId = upload.json().get("uploadId").asString();
+        assertThat(api.post("/api/uploads/" + uploadId + "/preview",
+                api.toJson(Map.of("sheetIndex", 0, "productCode", productCode))).ok()).isTrue();
+        return uploadId;
+    }
+
+    @Test
     void invalidParamsReturnProblemDetail() {
         var response = api.post("/api/uploads/00000000-0000-0000-0000-000000000000/preview",
                 api.toJson(Map.of("sheetIndex", 0)));
@@ -560,5 +647,14 @@ class ImportFlowTest extends AbstractIntegrationTest {
         assertThat(delete.ok()).as(delete.body()).isTrue();
         assertThat(api.get("/api/tasks/" + taskId).status()).isEqualTo(404);
         assertThat(api.get("/api/batches/" + batchId).status()).isEqualTo(404);
+    }
+
+    /** Lower case hex MD5 of the given bytes. */    private static String md5(byte[] content) {
+        try {
+            return java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("MD5").digest(content));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

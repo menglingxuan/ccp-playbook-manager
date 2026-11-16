@@ -22,6 +22,7 @@ public class AppProperties {
     private Export export = new Export();
     private Audit audit = new Audit();
     private Resources resources = new Resources();
+    private Ui ui = new Ui();
 
     /** Reserved word friendly accessor for {@code app.import.*}. */
     @Setter(AccessLevel.NONE)
@@ -49,6 +50,10 @@ public class AppProperties {
         private long maxFileSizeBytes = 52_428_800L;
         private int maxRowsPerSheet = 200_000;
         private int maxSheets = 50;
+        /** Columns accepted in one row; a wider sheet is rejected instead of being loaded. */
+        private int maxColumns = 1_000;
+        /** Characters accepted in one cell. */
+        private int maxCellLength = 32_768;
         private int maxCloneCount = 200;
         private int maxBulkDelete = 500;
         private long uploadTtlMinutes = 60;
@@ -56,6 +61,8 @@ public class AppProperties {
         private int previewRowLimit = 300;
         private int previewSampleRows = 20;
         private int maxIssueDetails = 200;
+        /** Cases touched by one bulk field update; larger batches must be narrowed first. */
+        private int maxBulkFieldUpdate = 5000;
     }
 
     @Getter
@@ -93,6 +100,27 @@ public class AppProperties {
     public static class Resources {
         private boolean heapMetricsEnabled = true;
         private boolean diskMetricsEnabled = true;
+    }
+
+    /**
+     * Shell display switches.
+     *
+     * <p>The tenant identifier is only meaningful where one instance serves several tenants, so it
+     * stays hidden unless the deployment asks for it.
+     */
+    @Getter
+    @Setter
+    public static class Ui {
+        private boolean showTenant = false;
+        /**
+         * Upper bound of issues shown inline before the wizard switches to a paginated panel.
+         *
+         * <p>The list always previews a handful of entries; a short list expands in place, a long one
+         * opens a drawer so the page keeps its height.
+         */
+        private int issueInlineLimit = 10;
+        /** Number of issues rendered before the "more" row. */
+        private int issuePreviewRows = 5;
     }
 
     @Getter

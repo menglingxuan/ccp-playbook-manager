@@ -30,7 +30,6 @@ public class PageController {
         model.addAttribute("title", "导入任务");
         model.addAttribute("tenantId", tenantProvider.tenantId());
         model.addAttribute("mode", properties.getMode().name());
-        model.addAttribute("summary", taskService.statusSummary(tenantProvider.tenantId()));
         return "index";
     }
 
@@ -67,7 +66,7 @@ public class PageController {
     @GetMapping("/exports")
     public String exports(Model model) {
         model.addAttribute("page", "exports");
-        model.addAttribute("title", "导出管理");
+        model.addAttribute("title", "导出记录");
         return "exports";
     }
 

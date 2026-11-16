@@ -25,6 +25,10 @@
   <section class="layout hidden" id="wizardArea" style="margin-top:16px">
     <aside class="sidebar">
       <div class="sidebar-head"><span>Sheet 列表</span><span class="count" id="sheetCount">0</span></div>
+      <div class="sheet-actions">
+        <button class="tool-btn primary small" id="importSelectedBtn" disabled>导入所选 Sheet</button>
+        <button class="link-btn" id="selectAllSheets" type="button">全选</button>
+      </div>
       <div id="sheetList"></div>
     </aside>
 
@@ -38,6 +42,15 @@
         </div>
       </div>
       <div class="panel-body">
+        <div class="import-task">
+          <div class="field">
+            <label for="importTaskName">任务名称 / 任务 ID（可选）</label>
+            <input id="importTaskName" type="text" list="importTaskNames" autocomplete="off"
+                   maxlength="256" placeholder="留空则新建任务；可填已有任务名或任务 ID">
+            <datalist id="importTaskNames"></datalist>
+            <div class="hint">填写已有任务名或任务 ID：本次批次并入该任务（不新建任务）；填写新名称：用它新建任务；留空：沿用默认命名（Untitled）。</div>
+          </div>
+        </div>
         <div class="params wizard-params">
           <div class="field">
             <label for="productSelect">产品</label>
@@ -86,13 +99,32 @@
             <tbody id="previewBody"></tbody>
           </table>
         </div>
-        <div id="previewMore" class="mono-sm preview-more"></div>
+        <div class="preview-pager" id="previewPager">
+          <button class="tool-btn small" id="previewFirst" type="button" title="第一页">«</button>
+          <button class="tool-btn small" id="previewPrev" type="button" title="上一页">‹</button>
+          <span class="mono-sm" id="previewRange"></span>
+          <button class="tool-btn small" id="previewNext" type="button" title="下一页">›</button>
+          <button class="tool-btn small" id="previewLast" type="button" title="最后一页">»</button>
+          <label class="mono-sm preview-page-size">每页
+            <select id="previewPageSize">
+              <option value="20">20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select> 行
+          </label>
+        </div>
 
         <div id="previewStats" class="mono-sm" style="margin-top:10px"></div>
 
         <details class="issues-panel" id="previewIssuePanel">
           <summary id="previewIssueSummary">问题</summary>
           <div class="issues" id="previewIssues"></div>
+          <div class="issue-limit">
+            <label for="issueInlineLimit">问题清单展开上限</label>
+            <input type="number" id="issueInlineLimit" min="5" max="200" step="1" value="10">
+            <span class="hint">超过该条数时，点「更多…」在独立面板中分页查看</span>
+          </div>
         </details>
       </div>
     </section>

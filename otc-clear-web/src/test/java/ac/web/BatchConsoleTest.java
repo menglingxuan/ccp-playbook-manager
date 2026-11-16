@@ -25,6 +25,37 @@ class BatchConsoleTest extends AbstractIntegrationTest {
             "maturityDate", "notional", "notionalCurrency", "fixedRate", "direction");
 
     @Test
+    void batchNamesAreUniqueInsideTheirTask() {
+        String taskName = "Name task " + UUID.randomUUID().toString().substring(0, 8);
+        String first = importOneBatchIntoTask(taskName, "bname_a");
+        String second = importOneBatchIntoTask(taskName, "bname_b");
+
+        // both batches live in one task and start from the Untitled series
+        assertThat(api.get("/api/batches/" + first).json().get("name").asString()).isEqualTo("Untitled");
+        assertThat(api.get("/api/batches/" + second).json().get("name").asString()).isEqualTo("Untitled 2");
+
+        // a duplicate inside the task is rejected
+        assertThat(api.patch("/api/batches/" + second + "/name",
+                api.toJson(Map.of("name", "Untitled"))).status()).isEqualTo(409);
+        // the rename endpoint and the console dialog both store the name
+        assertThat(api.patch("/api/batches/" + second + "/name",
+                api.toJson(Map.of("name", " 批次 B "))).json().get("name").asString()).isEqualTo("批次 B");
+        assertThat(api.patch("/api/batches/" + first + "/meta",
+                api.toJson(Map.of("name", "批次 A"))).json().get("name").asString()).isEqualTo("批次 A");
+        assertThat(api.get("/api/batches/" + first).json().get("name").asString()).isEqualTo("批次 A");
+
+        assertThat(api.patch("/api/batches/" + second + "/name", api.toJson(Map.of("name", "  ")))
+                .status()).isEqualTo(400);
+        assertThat(api.patch("/api/batches/" + second + "/name",
+                api.toJson(Map.of("name", "x".repeat(257)))).status()).isEqualTo(400);
+
+        // the same name is fine in another task
+        String otherTaskBatch = importOneBatch("bname_other");
+        assertThat(api.patch("/api/batches/" + otherTaskBatch + "/name",
+                api.toJson(Map.of("name", "批次 A"))).ok()).isTrue();
+    }
+
+    @Test
     void metaPersistsFavoritePinnedTagsAndNote() {
         String batchId = importOneBatch("meta_a");
         String url = "/api/batches/" + batchId + "/meta";
@@ -69,7 +100,72 @@ class BatchConsoleTest extends AbstractIntegrationTest {
             tooMany.add("tag" + i);
         }
         assertThat(api.patch(url, api.toJson(Map.of("tags", tooMany))).status()).isEqualTo(400);
-        assertThat(api.patch(url, api.toJson(Map.of("note", "n".repeat(501)))).status()).isEqualTo(400);
+        assertThat(api.patch(url, api.toJson(Map.of("note", "n".repeat(2001)))).status()).isEqualTo(400);
+    }
+
+    @Test
+    void metaEditorNoteSharesTheInlineRemark() {
+        String batchId = importOneBatch("meta_note");
+        String url = "/api/batches/" + batchId + "/meta";
+        String longNote = "第一行\n第二行\n" + "x".repeat(1500);
+
+        // the dialog uses the same rules as the inline remark: multi line and up to 2000 characters
+        var saved = api.patch(url, api.toJson(Map.of("note", longNote)));
+        assertThat(saved.ok()).as(saved.body()).isTrue();
+        assertThat(saved.json().get("note").asString()).isEqualTo(longNote);
+        assertThat(api.get("/api/batches/" + batchId).json().get("note").asString()).isEqualTo(longNote);
+
+        // both editors write the same column
+        assertThat(api.patch("/api/batches/" + batchId, api.toJson(Map.of("note", "inline note"))).ok())
+                .isTrue();
+        assertThat(api.get("/api/batches/" + batchId).json().get("note").asString())
+                .isEqualTo("inline note");
+        assertThat(api.patch(url, api.toJson(Map.of("note", ""))).json().get("note").isNull()).isTrue();
+    }
+
+    @Test
+    void predefinedTagsComeFromTagSetsOnly() {
+        String suffix = UUID.randomUUID().toString().substring(0, 6).toUpperCase(java.util.Locale.ROOT);
+        String tagSet = "BATCH_TAG_" + suffix;
+        String valueSet = "BATCH_VAL_" + suffix;
+        assertThat(api.post("/api/meta/sets",
+                api.toJson(Map.of("code", tagSet, "name", "Batch tags", "type", "TAG"))).ok()).isTrue();
+        assertThat(api.post("/api/meta/sets",
+                api.toJson(Map.of("code", valueSet, "name", "Plain values", "type", "VALUE"))).ok()).isTrue();
+        assertThat(api.post("/api/meta/sets/" + tagSet + "/items",
+                api.toJson(Map.of("code", "PRIORITY", "label", "Priority", "content", " 高优先级 "))).ok())
+                .isTrue();
+        assertThat(api.post("/api/meta/sets/" + tagSet + "/items",
+                api.toJson(Map.of("code", "REGRESSION", "label", "回归测试", "enabled", false))).ok())
+                .isTrue();
+        // a disabled item is not suggested
+        assertThat(api.patch("/api/meta/sets/" + tagSet + "/items/REGRESSION",
+                api.toJson(Map.of("label", "回归测试", "enabled", false))).ok()).isTrue();
+        // a value set item never shows up as a tag
+        assertThat(api.post("/api/meta/sets/" + valueSet + "/items",
+                api.toJson(Map.of("code", "PLAIN", "label", "plain"))).ok()).isTrue();
+
+        List<String> tags = new ArrayList<>();
+        api.get("/api/meta/tags").json().forEach(node -> tags.add(node.asString()));
+        assertThat(tags).contains("高优先级").doesNotContain("回归测试", "plain", "PLAIN");
+
+        // the set keeps the tag kind once stored
+        JsonNode sets = api.get("/api/meta/sets").json();
+        JsonNode stored = null;
+        for (JsonNode entry : sets) {
+            if (tagSet.equals(entry.get("set").get("code").asString())) {
+                stored = entry.get("set");
+            }
+        }
+        assertThat(stored).isNotNull();
+        assertThat(stored.get("type").asString()).isEqualTo("TAG");
+
+        assertThat(api.post("/api/meta/sets",
+                api.toJson(Map.of("code", "BAD_" + suffix, "name", "Bad", "type", "TAGS"))).status())
+                .isEqualTo(400);
+
+        api.delete("/api/meta/sets/" + tagSet);
+        api.delete("/api/meta/sets/" + valueSet);
     }
 
     @Test
@@ -82,9 +178,9 @@ class BatchConsoleTest extends AbstractIntegrationTest {
         assertThat(api.patch("/api/batches/" + second + "/meta",
                 api.toJson(Map.of("tags", List.of(tag), "favorite", true))).ok()).isTrue();
 
-        assertThat(batchIds("/api/batches?sort=created_asc&size=50"))
+        assertThat(batchIds("/api/batches?sort=created_asc&size=200"))
                 .as("oldest first").containsSubsequence(first, second);
-        assertThat(batchIds("/api/batches?sort=created_desc&size=50"))
+        assertThat(batchIds("/api/batches?sort=created_desc&size=200"))
                 .as("newest first").containsSubsequence(second, first);
 
         String tagged = "/api/batches?tag=" + tag;
@@ -179,6 +275,24 @@ class BatchConsoleTest extends AbstractIntegrationTest {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         return importOneBatch(fileNamePrefix + "_" + suffix,
                 "BC-" + suffix, "BC-" + suffix + "-B");
+    }
+
+    /** Imports two parallel batches into one task so their names share the same scope. */
+    private String importOneBatchIntoTask(String taskName, String fileNamePrefix) {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String productCode = productWithFields("MW", "IRS", KEEP_FIELDS);
+        String csv = CSV_TEMPLATE.formatted("BN-" + suffix, "BN-" + suffix + "-B");
+        var upload = api.upload("/api/uploads", fileNamePrefix + "_" + suffix + ".csv",
+                csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(upload.ok()).as(upload.body()).isTrue();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("uploadId", upload.json().get("uploadId").asString());
+        payload.put("force", false);
+        payload.put("taskName", taskName);
+        payload.put("sheets", List.of(Map.of("sheetIndex", 0, "productCode", productCode)));
+        var imported = api.post("/api/imports", api.toJson(payload));
+        assertThat(imported.ok()).as(imported.body()).isTrue();
+        return imported.json().get("batches").get(0).get("batchId").asString();
     }
 
     private String importOneBatch(String fileNamePrefix, String tradeId, String secondTradeId) {

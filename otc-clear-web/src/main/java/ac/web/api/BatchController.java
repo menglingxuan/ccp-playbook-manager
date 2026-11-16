@@ -3,7 +3,15 @@ package ac.web.api;
 import ac.core.common.PageQuery;
 import ac.core.persistence.BatchFilter;
 import ac.core.persistence.CaseFilter;
+import ac.core.persistence.ImportBatchRow;
+import ac.core.persistence.ProductRepository;
+import ac.core.service.batch.BatchCompareService;
 import ac.core.service.batch.BatchService;
+import ac.core.service.cases.BulkFieldUpdateRequest;
+import ac.core.service.cases.BulkFieldUpdateResult;
+import ac.core.service.cases.CaseService;
+import ac.core.service.validation.ValidationService;
+import ac.domain.validation.ValidationOptions;
 import ac.web.config.TenantProvider;
 import ac.web.dto.ViewMapper;
 import java.time.LocalDate;
@@ -15,6 +23,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -26,11 +35,35 @@ import org.springframework.web.bind.annotation.RestController;
 public class BatchController {
 
     private final BatchService batchService;
+    private final CaseService caseService;
+    private final BatchCompareService compareService;
+    private final ProductRepository productRepository;
+    private final ValidationService validationService;
     private final TenantProvider tenantProvider;
 
-    public BatchController(BatchService batchService, TenantProvider tenantProvider) {
+    public BatchController(BatchService batchService, CaseService caseService,
+            BatchCompareService compareService, ProductRepository productRepository,
+            ValidationService validationService, TenantProvider tenantProvider) {
         this.batchService = batchService;
+        this.caseService = caseService;
+        this.compareService = compareService;
+        this.productRepository = productRepository;
+        this.validationService = validationService;
         this.tenantProvider = tenantProvider;
+    }
+
+    /**
+     * Batch view with the product display name and its base product code, so the console can show
+     * "IRS" as the base product and "IRS Standard" as the product without extra lookups.
+     */
+    private Map<String, Object> view(ImportBatchRow row) {
+        Map<String, Object> view = new LinkedHashMap<>(ViewMapper.batch(row));
+        String tenantId = tenantProvider.tenantId();
+        productRepository.findByCode(tenantId, row.productCode()).ifPresent(product -> {
+            view.put("productName", product.name());
+            view.put("baseProductCode", product.baseProductCode());
+        });
+        return view;
     }
 
     /**
@@ -57,7 +90,7 @@ public class BatchController {
                 parseDate(from), parseDate(to), sort, includeDeleted, includeExternal, pageQuery);
         var result = batchService.search(tenantProvider.tenantId(), filter);
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("items", result.items().stream().map(ViewMapper::batch).toList());
+        body.put("items", result.items().stream().map(this::view).toList());
         body.put("page", result.page());
         body.put("size", result.size());
         body.put("total", result.total());
@@ -89,13 +122,13 @@ public class BatchController {
     public List<Map<String, Object>> dock(@RequestParam(required = false, defaultValue = "12") int limit,
             @RequestParam(required = false, defaultValue = "false") boolean includeDeleted) {
         return batchService.dock(tenantProvider.tenantId(), limit, includeDeleted).stream()
-                .map(ViewMapper::batch).toList();
+                .map(this::view).toList();
     }
 
     @GetMapping("/{id}")
     public Map<String, Object> detail(@PathVariable String id) {
         var batch = batchService.require(tenantProvider.tenantId(), id);
-        Map<String, Object> body = new LinkedHashMap<>(ViewMapper.batch(batch));
+        Map<String, Object> body = new LinkedHashMap<>(view(batch));
         body.put("activeCases", batchService.activeCaseCount(tenantProvider.tenantId(), id));
         return body;
     }
@@ -106,25 +139,61 @@ public class BatchController {
         return Map.of("updated", true);
     }
 
+    /** Renames a batch; duplicate names inside the task are rejected with 409. */
+    @PatchMapping("/{id}/name")
+    public Map<String, Object> rename(@PathVariable String id, @RequestBody Map<String, String> body) {
+        String name = batchService.rename(tenantProvider.tenantId(), id, body.get("name"));
+        return Map.of("id", id, "name", name);
+    }
+
     /**
      * Updates the console metadata; omitted fields keep their stored value.
      *
-     * @param body {@code favorite}, {@code pinned}, {@code tags} (list or comma separated) and {@code note}
+     * @param body {@code name}, {@code favorite}, {@code pinned}, {@code tags} (list or comma
+     *             separated) and {@code note}
      */
     @PatchMapping("/{id}/meta")
     public Map<String, Object> updateMeta(@PathVariable String id, @RequestBody Map<String, Object> body) {
+        String name = body.containsKey("name") && body.get("name") != null
+                ? String.valueOf(body.get("name")) : null;
         Boolean favorite = booleanValue(body.get("favorite"));
         Boolean pinned = booleanValue(body.get("pinned"));
         List<String> tags = body.containsKey("tags") ? stringList(body.get("tags")) : null;
         String note = body.containsKey("note") ? String.valueOf(body.get("note")) : null;
-        var row = batchService.updateMeta(tenantProvider.tenantId(), id, favorite, pinned, tags, note);
-        return new LinkedHashMap<>(ViewMapper.batch(row));
+        var row = batchService.updateMeta(tenantProvider.tenantId(), id, name, favorite, pinned, tags, note);
+        return new LinkedHashMap<>(view(row));
     }
 
     @DeleteMapping("/{id}")
     public Map<String, Object> delete(@PathVariable String id) {
         batchService.delete(tenantProvider.tenantId(), id);
         return Map.of("deleted", true);
+    }
+
+    /**
+     * Compares this batch with another one of the tenant; the result is returned only and never stored.
+     *
+     * @param body {@code rightBatchId}, {@code mode} ({@code FIELDS} / {@code VALUES}), {@code align}
+     *             ({@code KEY} / {@code ROW} / {@code TESTCASE}) and {@code compareOrder}
+     */
+    @PostMapping("/{id}/compare")
+    public BatchCompareService.Result compare(@PathVariable String id,
+            @RequestBody BatchCompareService.Request body) {
+        return compareService.compare(tenantProvider.tenantId(), id, body);
+    }
+
+    /**
+     * Validates every active case of the batch against the field rules of its product.
+     *
+     * @param ignoreCase match values case-insensitively, default {@code false}
+     * @param skipBlank  leave blank values unchecked, default {@code true}
+     */
+    @GetMapping("/{id}/validation")
+    public ValidationService.Result validation(@PathVariable String id,
+            @RequestParam(required = false, defaultValue = "false") boolean ignoreCase,
+            @RequestParam(required = false, defaultValue = "true") boolean skipBlank) {
+        return validationService.validateBatch(tenantProvider.tenantId(), id,
+                new ValidationOptions(ignoreCase, skipBlank));
     }
 
     @GetMapping("/{id}/cases")
@@ -147,7 +216,20 @@ public class BatchController {
         if (withSummary) {
             body.put("summary", batchService.caseSummary(tenantId, id, query, hasFormula));
         }
+        body.put("duplicates", batchService.caseDuplicates(tenantId, id));
         return body;
+    }
+
+    /**
+     * Rewrites one field of every case in scope, either with a value, a formula or by clearing it.
+     *
+     * <p>{@code dryRun=true} answers only the impact: matched cases and a short before/after
+     * preview, nothing is written.
+     */
+    @PostMapping("/{id}/cases/bulk-update")
+    public BulkFieldUpdateResult bulkUpdateField(@PathVariable String id,
+            @RequestBody BulkFieldUpdateRequest request) {
+        return caseService.bulkUpdateField(tenantProvider.tenantId(), id, request);
     }
 
     private static Boolean booleanValue(Object value) {

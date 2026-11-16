@@ -10,11 +10,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -54,6 +56,17 @@ public class GlobalExceptionHandler {
             IllegalArgumentException.class})
     public ResponseEntity<ProblemDetail> handleBadRequest(Exception exception) {
         return problem(ErrorCode.INVALID_REQUEST, exception.getMessage());
+    }
+
+    /** A query parameter that is not a number, a bad enum value or a malformed JSON body. */
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, HttpMessageNotReadableException.class})
+    public ResponseEntity<ProblemDetail> handleWrongShape(Exception exception) {
+        if (exception instanceof MethodArgumentTypeMismatchException mismatch) {
+            Object value = mismatch.getValue();
+            return problem(ErrorCode.INVALID_REQUEST,
+                    "Parameter '" + mismatch.getName() + "' has an invalid value: " + value);
+        }
+        return problem(ErrorCode.INVALID_REQUEST, "The request body could not be read");
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

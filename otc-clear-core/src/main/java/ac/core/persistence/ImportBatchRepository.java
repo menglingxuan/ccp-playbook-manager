@@ -1,6 +1,7 @@
 package ac.core.persistence;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,8 +13,11 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class ImportBatchRepository {
 
+    /** Default name of a batch until the user renames it. */
+    public static final String DEFAULT_NAME = "Untitled";
+
     private static final String COLUMNS = """
-            id, tenant_id, task_id, upload_id, kind, parent_batch_id, product_code, source_filename,
+            id, tenant_id, task_id, name, upload_id, kind, parent_batch_id, product_code, source_filename,
             source_sha256, source_type, sheet_name, header_row_index, trade_start_col, trade_end_col,
             layout_json, column_mapping, schema_hash, status, total_rows, invalid_rows, note, favorite,
             pinned, tags, created_by, created_at, updated_at, deleted_at
@@ -27,12 +31,12 @@ public class ImportBatchRepository {
 
     public void insert(ImportBatchRow row) {
         jdbc.sql("""
-                        INSERT INTO import_batch (id, tenant_id, task_id, upload_id, kind, parent_batch_id,
+                        INSERT INTO import_batch (id, tenant_id, task_id, name, upload_id, kind, parent_batch_id,
                             product_code, source_filename, source_sha256, source_type, sheet_name,
                             header_row_index, trade_start_col, trade_end_col, layout_json, column_mapping,
                             schema_hash, status, total_rows, invalid_rows, note, favorite, pinned, tags,
                             created_by, created_at, updated_at, deleted_at)
-                        VALUES (:id, :tenantId, :taskId, :uploadId, :kind, :parentBatchId,
+                        VALUES (:id, :tenantId, :taskId, :name, :uploadId, :kind, :parentBatchId,
                             :productCode, :sourceFilename, :sourceSha256, :sourceType, :sheetName,
                             :headerRowIndex, :tradeStartCol, :tradeEndCol, :layoutJson, :columnMapping,
                             :schemaHash, :status, :totalRows, :invalidRows, :note, :favorite, :pinned, :tags,
@@ -41,6 +45,7 @@ public class ImportBatchRepository {
                 .param("id", row.id())
                 .param("tenantId", row.tenantId())
                 .param("taskId", row.taskId())
+                .param("name", row.name())
                 .param("uploadId", row.uploadId())
                 .param("kind", row.kind())
                 .param("parentBatchId", row.parentBatchId())
@@ -69,6 +74,32 @@ public class ImportBatchRepository {
                 .update();
     }
 
+    public boolean nameExists(String tenantId, String taskId, String name) {
+        return jdbc.sql("""
+                        SELECT COUNT(*) FROM import_batch
+                        WHERE tenant_id = :tenantId AND LOWER(name) = LOWER(:name)
+                          AND (task_id = :taskId OR (task_id IS NULL AND :taskId IS NULL))
+                        """)
+                .param("tenantId", tenantId).param("taskId", taskId).param("name", name)
+                .query(Long.class).single() > 0;
+    }
+
+    /** First free name of the {@code Untitled}, {@code Untitled 2}, … series inside one task. */
+    public String nextDefaultName(String tenantId, String taskId) {
+        String candidate = DEFAULT_NAME;
+        int suffix = 2;
+        while (nameExists(tenantId, taskId, candidate)) {
+            candidate = DEFAULT_NAME + " " + suffix;
+            suffix++;
+        }
+        return candidate;
+    }
+
+    public void rename(String tenantId, String id, String name) {
+        jdbc.sql("UPDATE import_batch SET name = :name WHERE tenant_id = :tenantId AND id = :id")
+                .param("tenantId", tenantId).param("id", id).param("name", name).update();
+    }
+
     public Optional<ImportBatchRow> find(String tenantId, String id) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM import_batch WHERE tenant_id = :tenantId AND id = :id")
                 .param("tenantId", tenantId).param("id", id)
@@ -84,8 +115,19 @@ public class ImportBatchRepository {
                 .query(this::map).list();
     }
 
-    /** Batches of several tasks at once, oldest first, used to resolve source file locations. */
-    public List<ImportBatchRow> listByTaskIds(String tenantId, List<String> taskIds) {
+    /** Batches by id, used to label search results with their batch name. */
+    public List<ImportBatchRow> listByIds(String tenantId, Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("SELECT " + COLUMNS + """
+                         FROM import_batch WHERE tenant_id = :tenantId AND id IN (:ids)
+                        """)
+                .param("tenantId", tenantId).param("ids", ids)
+                .query(this::map).list();
+    }
+
+    /** Batches of several tasks at once, oldest first, used to resolve source file locations. */    public List<ImportBatchRow> listByTaskIds(String tenantId, List<String> taskIds) {
         if (taskIds.isEmpty()) {
             return List.of();
         }
@@ -201,7 +243,8 @@ public class ImportBatchRepository {
             params.put("createdTo", utcStartOfDay(filter.to().plusDays(1)));
         }
         if (filter.query() != null && !filter.query().isBlank()) {
-            sql.append(" AND (LOWER(b.source_filename) LIKE :query OR LOWER(b.sheet_name) LIKE :query")
+            sql.append(" AND (LOWER(b.name) LIKE :query")
+                    .append(" OR LOWER(b.source_filename) LIKE :query OR LOWER(b.sheet_name) LIKE :query")
                     .append(" OR LOWER(b.note) LIKE :query OR LOWER(b.tags) LIKE :query")
                     .append(" OR LOWER(b.product_code) LIKE :query OR LOWER(b.id) LIKE :query)");
             params.put("query", "%" + filter.query().trim().toLowerCase(java.util.Locale.ROOT) + "%");
@@ -273,12 +316,36 @@ public class ImportBatchRepository {
                 .param("deletedAt", deletedAt).param("tenantId", tenantId).param("id", id).update();
     }
 
-    public void softDeleteByTask(String tenantId, String taskId, LocalDateTime deletedAt) {
-        jdbc.sql("""
-                        UPDATE import_batch SET status = 'DELETED', deleted_at = :deletedAt, updated_at = :deletedAt
-                        WHERE tenant_id = :tenantId AND task_id = :taskId
+    /**
+     * Every batch of a task, including the ones that were already deleted on their own.
+     *
+     * <p>A purge has to reach those as well: their rows and files would otherwise stay behind without a
+     * task to reach them from.
+     *
+     * @param tenantId tenant scope
+     * @param taskId   task whose batches are collected
+     * @return the batches in creation order
+     */
+    public List<ImportBatchRow> listByTaskForPurge(String tenantId, String taskId) {
+        return jdbc.sql("SELECT " + COLUMNS + """
+                         FROM import_batch WHERE tenant_id = :tenantId AND task_id = :taskId
+                         ORDER BY created_at, sheet_name
                         """)
-                .param("deletedAt", deletedAt).param("tenantId", tenantId).param("taskId", taskId).update();
+                .param("tenantId", tenantId).param("taskId", taskId)
+                .query(this::map).list();
+    }
+
+    /** Physically removes the batches of a task; only used when the task itself is purged. */
+    public int purgeByTask(String tenantId, String taskId) {
+        return jdbc.sql("DELETE FROM import_batch WHERE tenant_id = :tenantId AND task_id = :taskId")
+                .param("tenantId", tenantId).param("taskId", taskId).update();
+    }
+
+    /** Number of batches that still refer to an upload; zero means its files can be removed. */
+    public long countByUploadId(String tenantId, String uploadId) {
+        return jdbc.sql("SELECT COUNT(*) FROM import_batch WHERE tenant_id = :tenantId AND upload_id = :uploadId")
+                .param("tenantId", tenantId).param("uploadId", uploadId)
+                .query(Long.class).single();
     }
 
     public long countRecent(String tenantId, LocalDateTime since) {
@@ -290,8 +357,12 @@ public class ImportBatchRepository {
                 .query(Long.class).single();
     }
 
+    /** Active batches of one product; deleted batches no longer block a product delete. */
     public long countByProduct(String tenantId, String productCode) {
-        return jdbc.sql("SELECT COUNT(*) FROM import_batch WHERE tenant_id = :tenantId AND product_code = :productCode")
+        return jdbc.sql("""
+                        SELECT COUNT(*) FROM import_batch
+                        WHERE tenant_id = :tenantId AND product_code = :productCode AND status <> 'DELETED'
+                        """)
                 .param("tenantId", tenantId).param("productCode", productCode).query(Long.class).single();
     }
 
@@ -301,6 +372,7 @@ public class ImportBatchRepository {
                 rs.getString("id"),
                 rs.getString("tenant_id"),
                 rs.getString("task_id"),
+                rs.getString("name"),
                 rs.getString("upload_id"),
                 rs.getString("kind"),
                 rs.getString("parent_batch_id"),

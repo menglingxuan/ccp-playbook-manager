@@ -29,6 +29,15 @@ import ac.domain.product.ColumnNames;
 import ac.domain.product.FieldRole;
 import ac.domain.product.PlatformCode;
 import ac.domain.product.ProductSchema;
+import ac.domain.table.CsvTableReader;
+import ac.domain.table.RawTable;
+import ac.domain.table.TableLimits;
+import ac.domain.table.TableReadException;
+import ac.domain.validation.RuleExpression;
+import ac.domain.validation.RuleSyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -57,6 +66,7 @@ public class ProductDefinitionService {
 
     /** Value type used when columns are imported straight from a file header. */
     private static final String VALUE_TYPE_TEXT = "TEXT";
+    private static final int VALIDATION_EXPR_LENGTH = 512;
 
     private final BaseProductRepository baseRepository;
     private final ProductRepository productRepository;
@@ -69,11 +79,13 @@ public class ProductDefinitionService {
     private final ProductCatalog catalog;
     private final TimeProvider time;
     private final AuditService audit;
+    private final ac.core.config.AppProperties properties;
 
     public ProductDefinitionService(BaseProductRepository baseRepository, ProductRepository productRepository,
             ImportBatchRepository batchRepository, TestCaseRepository caseRepository,
             MetaRepository metaRepository, MetaService metaService, MetaLookup metaLookup,
-            ProductSchemaMapper schemaMapper, ProductCatalog catalog, TimeProvider time, AuditService audit) {
+            ProductSchemaMapper schemaMapper, ProductCatalog catalog, TimeProvider time, AuditService audit,
+            ac.core.config.AppProperties properties) {
         this.baseRepository = baseRepository;
         this.productRepository = productRepository;
         this.batchRepository = batchRepository;
@@ -85,6 +97,56 @@ public class ProductDefinitionService {
         this.catalog = catalog;
         this.time = time;
         this.audit = audit;
+        this.properties = properties;
+    }
+
+    /**
+     * Reads the first row of a delimited file as column headers, in file order.
+     *
+     * <p>The file is streamed through a temporary file so encoding and quoting are handled by the same
+     * reader the import uses; only the first row is materialised.
+     *
+     * @param content  file content
+     * @param fileName original name, used for the logical sheet name and error messages
+     * @return trimmed, non blank headers
+     */
+    public List<String> readCsvHeaders(java.io.InputStream content, String fileName) {
+        Path temp = null;
+        try {
+            temp = Files.createTempFile("quick-fields-", ".csv");
+            Files.copy(content, temp, StandardCopyOption.REPLACE_EXISTING);
+            TableLimits limits = new TableLimits(properties.getLimits().getMaxColumns(),
+                    properties.getLimits().getMaxCellLength());
+            RawTable table = CsvTableReader.readPage(temp, 0, 1, null, limits);
+            if (table.rowCount() == 0) {
+                throw ApiException.invalid("The file has no header row");
+            }
+            List<String> headers = new ArrayList<>();
+            String[] texts = table.row(0).texts();
+            for (String text : texts) {
+                String header = text == null ? "" : text.trim();
+                if (!header.isEmpty()) {
+                    headers.add(header);
+                }
+            }
+            if (headers.isEmpty()) {
+                throw ApiException.invalid("The first row of '" + fileName + "' has no column names");
+            }
+            return headers;
+        } catch (TableReadException e) {
+            throw ApiException.invalid(e.getMessage());
+        } catch (java.io.IOException e) {
+            log.warn("Cannot read the headers of {}", fileName, e);
+            throw new ApiException(ErrorCode.INTERNAL_ERROR, "The file could not be read");
+        } finally {
+            if (temp != null) {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (java.io.IOException e) {
+                    log.debug("Cannot remove the temporary header file {}", temp, e);
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------ queries
@@ -163,8 +225,7 @@ public class ProductDefinitionService {
      */
     @Transactional
     public List<String> importBaseFieldsFromHeaders(String tenantId, String baseProductId,
-            List<String> headers) {
-        requireBase(tenantId, baseProductId);
+            List<String> headers) {        requireBase(tenantId, baseProductId);
         if (headers == null || headers.isEmpty()) {
             throw ApiException.invalid("At least one column header is required");
         }
@@ -183,7 +244,7 @@ public class ProductDefinitionService {
             String fieldKey = suggestFieldKey(header, baseProductId, null);
             BaseFieldRow row = new BaseFieldRow(Ids.newId(), tenantId, baseProductId, fieldKey, header,
                     header, List.of(), VALUE_TYPE_TEXT, FieldRole.BUSINESS.name(), List.of(), true, true,
-                    false, order, null, "", "");
+                    false, order, null, "", "", null);
             baseRepository.insertField(row);
             created.add(fieldKey);
         }
@@ -227,9 +288,11 @@ public class ProductDefinitionService {
         int order = request.sortOrder() == null
                 ? baseRepository.maxFieldOrder(baseProductId) + 1 : request.sortOrder();
         requireFreeOrder(tenantId, baseProductId, order, null);
+        String normalizedExpr = requireValidationExpr(tenantId, request.validationExpr());
         BaseFieldRow row = new BaseFieldRow(Ids.newId(), tenantId, baseProductId, spec.fieldKey(),
                 spec.header(), request.displayName(), spec.aliases(), spec.valueTypeCode(), spec.roleCode(),
-                spec.tags(), request.required(), true, false, order, request.remark(), "", "");
+                spec.tags(), request.required(), true, false, order, request.remark(), "", "",
+                normalizedExpr);
         baseRepository.insertField(row);
         refreshBaseHash(tenantId, baseProductId);
         audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_BASE_FIELD, row.id(), "CREATE",
@@ -248,12 +311,13 @@ public class ProductDefinitionService {
         int order = request.sortOrder() == null ? existing.sortOrder() : request.sortOrder();
         requireFreeOrder(tenantId, baseProductId, order, existing.id());
 
+        String normalizedExpr = requireValidationExpr(tenantId, request.validationExpr());
         BaseFieldRow updated = new BaseFieldRow(existing.id(), tenantId, baseProductId, spec.fieldKey(),
                 spec.header(), request.displayName(), spec.aliases(), spec.valueTypeCode(), spec.roleCode(),
                 spec.tags(), request.required(), existing.businessKey(), existing.keyFlag(), order,
-                request.remark(), existing.formatHint(), existing.clonePattern());
+                request.remark(), existing.formatHint(), existing.clonePattern(), normalizedExpr);
         baseRepository.updateField(updated, time.nowUtc());
-        propagateBaseField(tenantId, updated);
+        propagateBaseField(tenantId, updated, existing.validationExpr());
         refreshBaseHash(tenantId, baseProductId);
         audit.record(tenantId, AuditModule.PRODUCT_DEFINITION, AuditService.ENTITY_BASE_FIELD, fieldId, "UPDATE", Map.of("fieldKey", updated.fieldKey()));
         return toBaseFieldView(updated, lookup);
@@ -375,11 +439,22 @@ public class ProductDefinitionService {
         int order = update.sortOrder() <= 0 ? existing.sortOrder() : update.sortOrder();
         requireFreeProductOrder(tenantId, productId, order, existing.id());
 
+        String validationExpr;
+        if (update.validationExpr() == null) {
+            validationExpr = existing.validationExpr();
+        } else {
+            // a blank override falls back to the base product so the row always carries the effective rule
+            String normalized = requireValidationExpr(tenantId, update.validationExpr());
+            validationExpr = normalized != null ? normalized
+                    : baseField == null ? null : baseField.validationExpr();
+        }
+
         ProductFieldRow updated = new ProductFieldRow(existing.id(), tenantId, productId,
                 existing.baseFieldId(), existing.fieldKey(), existing.header(), existing.displayName(),
                 existing.aliases(), existing.valueTypeCode(), existing.roleCode(), update.tags(),
                 isBusinessRole(existing.roleCode()) || update.required(), existing.businessKey(),
-                existing.keyFlag(), order, update.remark(), existing.formatHint(), existing.clonePattern());
+                existing.keyFlag(), order, update.remark(), existing.formatHint(), existing.clonePattern(),
+                validationExpr);
         productRepository.updateField(updated, time.nowUtc());
         renumberProductFields(tenantId, productId);
         refreshProductHash(tenantId, productId);
@@ -451,7 +526,7 @@ public class ProductDefinitionService {
                     productRepository.insertField(copyOf(tenantId, productId, baseField, order), now);
                 }
             } else {
-                propagateToCopy(existing, baseField, now);
+                propagateToCopy(existing, baseField, baseField.validationExpr(), now);
             }
         }
         for (Map.Entry<String, ProductFieldRow> entry : byBaseField.entrySet()) {
@@ -536,24 +611,34 @@ public class ProductDefinitionService {
         return candidate;
     }
 
-    private void propagateBaseField(String tenantId, BaseFieldRow baseField) {
+    private void propagateBaseField(String tenantId, BaseFieldRow baseField, String previousExpression) {
         for (ProductRow product : productRepository.listByBaseProduct(tenantId, baseField.baseProductId())) {
             for (ProductFieldRow copy : productRepository.listFields(tenantId, product.id())) {
                 if (baseField.id().equals(copy.baseFieldId())) {
-                    propagateToCopy(copy, baseField, time.nowUtc());
+                    propagateToCopy(copy, baseField, previousExpression, time.nowUtc());
                     refreshProductHash(tenantId, product.id());
                 }
             }
         }
     }
 
-    private void propagateToCopy(ProductFieldRow copy, BaseFieldRow baseField, LocalDateTime now) {
+    /**
+     * Copies the base definition into a derived product field.
+     *
+     * <p>The validation expression is inherited: a copy that still holds the previous base expression
+     * (or nothing) follows the base, a copy with its own expression keeps it.
+     */
+    private void propagateToCopy(ProductFieldRow copy, BaseFieldRow baseField, String previousExpression,
+            LocalDateTime now) {
         boolean required = isBusinessRole(baseField.roleCode()) || baseField.required() || copy.required();
+        boolean inherited = copy.validationExpr() == null || copy.validationExpr().isBlank()
+                || copy.validationExpr().equals(previousExpression == null ? "" : previousExpression);
         ProductFieldRow updated = new ProductFieldRow(copy.id(), copy.tenantId(), copy.productId(),
                 baseField.id(), baseField.fieldKey(), baseField.header(), baseField.displayName(),
                 baseField.aliases(), baseField.valueTypeCode(), baseField.roleCode(), copy.tags(), required,
                 baseField.businessKey(), baseField.keyFlag(), copy.sortOrder(), copy.remark(),
-                baseField.formatHint(), baseField.clonePattern());
+                baseField.formatHint(), baseField.clonePattern(),
+                inherited ? baseField.validationExpr() : copy.validationExpr());
         productRepository.updateField(updated, now);
     }
 
@@ -563,7 +648,35 @@ public class ProductDefinitionService {
                 baseField.roleCode(), baseField.tags(),
                 isBusinessRole(baseField.roleCode()) || baseField.required(), baseField.businessKey(),
                 baseField.keyFlag(), sortOrder, baseField.remark(), baseField.formatHint(),
-                baseField.clonePattern());
+                baseField.clonePattern(), baseField.validationExpr());
+    }
+
+    /**
+     * Validates and normalizes a field validation expression.
+     *
+     * @return {@code null} when the field declares no rule
+     */
+    private String requireValidationExpr(String tenantId, String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        if (text.length() > VALIDATION_EXPR_LENGTH) {
+            throw ApiException.invalid("The validation expression exceeds " + VALIDATION_EXPR_LENGTH
+                    + " characters");
+        }
+        RuleExpression expression;
+        try {
+            expression = RuleExpression.parse(text);
+        } catch (RuleSyntaxException e) {
+            throw ApiException.invalid(e.getMessage());
+        }
+        Set<String> known = metaService.rules(tenantId).keySet();
+        List<String> unknown = expression.codes().stream().filter(code -> !known.contains(code)).toList();
+        if (!unknown.isEmpty()) {
+            throw ApiException.invalid("Unknown validation rule code(s): " + String.join(", ", unknown));
+        }
+        return text;
     }
 
     /** Business columns are always required in a derived product; managed columns stay configurable. */
@@ -686,7 +799,7 @@ public class ProductDefinitionService {
         return new BaseFieldView(field.id(), field.fieldKey(), field.header(), field.displayName(),
                 field.aliases(), field.valueTypeCode(), spec.label(), field.roleCode(),
                 lookup.roleLabels().getOrDefault(field.roleCode(), field.roleCode()), field.tags(),
-                field.required(), field.sortOrder(), field.remark());
+                field.required(), field.sortOrder(), field.remark(), field.validationExpr());
     }
 
     private ProductFieldView toProductFieldView(ProductFieldRow field, BaseFieldRow baseField,
@@ -697,7 +810,7 @@ public class ProductDefinitionService {
                 field.displayName(), field.aliases(), field.valueTypeCode(), spec.label(), field.roleCode(),
                 lookup.roleLabels().getOrDefault(field.roleCode(), field.roleCode()), field.tags(),
                 field.required(), baseField != null && baseField.required(), field.sortOrder(), baseSortOrder,
-                field.remark());
+                field.remark(), field.validationExpr());
     }
 
     /** Starter codes offered as suggestions when adding a base product to a platform. */

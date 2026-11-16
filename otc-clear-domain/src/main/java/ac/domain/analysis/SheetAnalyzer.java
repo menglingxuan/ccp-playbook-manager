@@ -90,10 +90,13 @@ public final class SheetAnalyzer {
                 sampleInvalid++;
             }
             samples.add(new SampleRow(row.sourceRow(), row.data(), row.formulas(), row.managed(),
-                    row.extras(), row.issues(), row.valid()));
+                    row.extras(), row.rawTexts(), row.issues(), row.valid()));
         }
 
-        int dataRows = countNonEmptyRows(table, layout.dataStartRow(), lastRow);
+        int dataRows = table.truncated()
+                // only the first rows are held in memory for a preview: report the real row count
+                ? Math.max(0, table.declaredRowCount() - (layout.dataStartRow() - 1))
+                : countNonEmptyRows(table, layout.dataStartRow(), lastRow);
         PreviewStats stats = new PreviewStats(dataRows, layout.mappedTradeColumnCount(),
                 layout.managedColumnCount(), sampleInvalid);
         return new SheetPreview(schema.code(), resolution.valid(), resolution.issues(), layout, samples, stats);

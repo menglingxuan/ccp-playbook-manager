@@ -7,8 +7,13 @@
 <main class="page">
   <div class="page-head">
     <div>
-      <h2 class="page-title" th:text="#{meta.title}">字段元信息</h2>
+      <h2 class="page-title" th:text="#{meta.title}">元数据</h2>
       <div class="page-sub" th:text="#{meta.subtitle}">枚举字典</div>
+    </div>
+    <div class="page-head-actions">
+      <button class="tool-btn" id="btnExportSql" th:text="#{definitions.btn.exportSql}">导出 SQL</button>
+      <button class="tool-btn" id="btnExportXlsx" th:text="#{definitions.btn.exportXlsx}">导出 Excel</button>
+      <button class="tool-btn" id="btnImportDefinitions" th:text="#{definitions.btn.import}">导入</button>
     </div>
   </div>
 
@@ -64,7 +69,8 @@
             <tr>
               <th class="num" th:text="#{common.order}">序号</th>
               <th th:text="#{meta.column.code}">代码</th>
-              <th th:text="#{meta.column.label}">显示名</th>
+              <th th:text="#{meta.column.label}" th:title="#{meta.column.labelHint}">取值名称</th>
+              <th th:text="#{meta.column.content}">内容</th>
               <th th:text="#{meta.column.refSet}">引用集合</th>
               <th th:text="#{meta.column.status}">状态</th>
               <th th:text="#{common.remark}">备注</th>

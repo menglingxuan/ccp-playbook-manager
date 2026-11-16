@@ -1,6 +1,11 @@
 package ac.domain.layout;
 
+import ac.domain.product.FieldDef;
 import ac.domain.product.HeaderNormalizer;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** Classifies columns that sit outside the trade block. */
@@ -43,5 +48,23 @@ public final class ManagedColumnClassifier {
             suffix++;
         }
         return candidate;
+    }
+
+    /**
+     * Field key to {@code managed_json} storage key for every managed field of the product, in
+     * declaration order so duplicated headers get the same {@code #n} suffix as the import layout.
+     */
+    public static Map<String, String> storageKeys(List<FieldDef> fields) {
+        Map<String, String> keys = new LinkedHashMap<>();
+        Set<String> used = new LinkedHashSet<>();
+        for (FieldDef field : fields) {
+            if (!field.isManaged()) {
+                continue;
+            }
+            String storageKey = storageKey(classify(field.header()), field.header(), used);
+            used.add(storageKey);
+            keys.put(field.key(), storageKey);
+        }
+        return keys;
     }
 }

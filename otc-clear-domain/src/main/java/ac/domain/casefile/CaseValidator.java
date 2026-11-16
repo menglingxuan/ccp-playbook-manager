@@ -7,6 +7,8 @@ import ac.domain.product.FieldType;
 import ac.domain.product.ProductSchema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -83,6 +85,8 @@ public final class CaseValidator {
             case DECIMAL -> value instanceof BigDecimal || value instanceof Number;
             case INTEGER -> value instanceof Long || value instanceof Integer;
             case DATE -> value instanceof LocalDate || value instanceof String;
+            case TIME -> value instanceof LocalTime || value instanceof String;
+            case DATETIME -> value instanceof LocalDateTime || value instanceof String;
             case BOOLEAN -> value instanceof Boolean;
         };
     }

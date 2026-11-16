@@ -47,16 +47,33 @@ public class MetaController {
         return meta.optionMap(tenantProvider.tenantId());
     }
 
+    /**
+     * Predefined tags gathered from every {@code TAG} set, used as batch tag suggestions.
+     *
+     * <p>Set names are irrelevant here: the batch editor offers the values of all tag sets at once and
+     * still accepts free tags.
+     */
+    @GetMapping("/tags")
+    public List<String> tags() {
+        return meta.tagOptions(tenantProvider.tenantId());
+    }
+
+    /** Items of one set, used by the bulk update dialog when a set is picked. */
+    @GetMapping("/sets/{code}/items")
+    public List<MetaService.ItemView> items(@PathVariable String code) {
+        return meta.items(tenantProvider.tenantId(), code);
+    }
+
     @PostMapping("/sets")
     public MetaService.SetView createSet(@RequestBody SetRequest request) {
         return meta.createSet(tenantProvider.tenantId(), request.code(), request.name(), request.description(),
-                request.sortOrder());
+                request.sortOrder(), request.type());
     }
 
     @PatchMapping("/sets/{code}")
     public List<MetaService.SetView> updateSet(@PathVariable String code, @RequestBody SetRequest request) {
         meta.updateSet(tenantProvider.tenantId(), code, request.name(), request.description(),
-                request.sortOrder());
+                request.sortOrder(), request.type());
         return meta.sets(tenantProvider.tenantId());
     }
 
@@ -69,18 +86,50 @@ public class MetaController {
     @PostMapping("/sets/{code}/items")
     public MetaService.ItemView createItem(@PathVariable String code, @RequestBody ItemRequest request) {
         return meta.createItem(tenantProvider.tenantId(), code, request.code(), request.label(),
-                request.refSetCode(), request.sortOrder(), request.remark());
+                request.refSetCode(), request.sortOrder(), request.remark(), request.content(),
+                request.ruleType(), request.severity());
     }
 
     @PatchMapping("/sets/{code}/items/{itemCode}")
     public MetaService.ItemView updateItem(@PathVariable String code, @PathVariable String itemCode,
             @RequestBody ItemRequest request) {
         meta.updateItem(tenantProvider.tenantId(), code, itemCode, request.label(), request.refSetCode(),
-                request.sortOrder(), request.enabled(), request.remark());
+                request.sortOrder(), request.enabled(), request.remark(), request.content(),
+                request.ruleType(), request.severity());
         return meta.items(tenantProvider.tenantId(), code).stream()
                 .filter(item -> item.code().equals(itemCode))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    /**
+     * Every enabled validation rule of the tenant, used by the field editors as suggestions.
+     *
+     * <p>Rule codes are unique across the validation sets, so a field expression only needs the code.
+     */
+    @GetMapping("/rules")
+    public List<MetaService.ItemView> rules() {
+        return meta.ruleOptions(tenantProvider.tenantId());
+    }
+
+    /**
+     * Compiles and tests one rule expression against a sample value.
+     *
+     * @param request expression and sample text
+     */
+    @PostMapping("/rules/test")
+    public MetaService.RuleTest testExpression(@RequestBody RuleTestRequest request) {
+        return meta.testExpression(tenantProvider.tenantId(), request.expression(), request.text());
+    }
+
+    /**
+     * Compiles one pattern rule and matches it against a sample value, used by the rule editor.
+     *
+     * @param request rule type, pattern and sample text
+     */
+    @PostMapping("/rules/match")
+    public MetaService.PatternTest testPattern(@RequestBody PatternMatchRequest request) {
+        return meta.testPattern(request.ruleType(), request.expression(), request.text());
     }
 
     @DeleteMapping("/sets/{code}/items/{itemCode}")
@@ -109,8 +158,10 @@ public class MetaController {
      * @param name        display name
      * @param description free form note
      * @param sortOrder   display order; {@code null} appends the set at the end
+     * @param type        {@code VALUE}, {@code FORMULA} or {@code TAG}; {@code null} keeps the stored
+     *                    type and new sets default to {@code VALUE}
      */
-    public record SetRequest(String code, String name, String description, Integer sortOrder) {
+    public record SetRequest(String code, String name, String description, Integer sortOrder, String type) {
     }
 
     /**
@@ -123,8 +174,32 @@ public class MetaController {
      * @param enabled     whether the item can be selected; {@code null} keeps the stored value and new
      *                    items are enabled by default
      * @param remark      free form note
+     * @param content     value text of a VALUE or TAG set, the formula of a FORMULA set or the pattern
+     *                    of a VALIDATION set
+     * @param ruleType    {@code REGEX} or {@code WILDCARD} for the pattern of a VALIDATION set
+     * @param severity    {@code WARN} or {@code ERROR} for a rule that rejects a value; {@code null}
+     *                    keeps the stored level and new rules warn
      */
     public record ItemRequest(String code, String label, String refSetCode, Integer sortOrder,
-            Boolean enabled, String remark) {
+            Boolean enabled, String remark, String content, String ruleType, String severity) {
+    }
+
+    /**
+     * Rule test payload.
+     *
+     * @param expression rule codes combined with AND / OR / NOT and parentheses
+     * @param text       sample value
+     */
+    public record RuleTestRequest(String expression, String text) {
+    }
+
+    /**
+     * Request of the pattern test endpoint.
+     *
+     * @param ruleType   {@code REGEX} or {@code WILDCARD}
+     * @param expression the pattern text
+     * @param text       sample value
+     */
+    public record PatternMatchRequest(String ruleType, String expression, String text) {
     }
 }

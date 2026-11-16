@@ -18,6 +18,7 @@ import ac.core.service.baseline.BaselineStore;
 import ac.core.service.cases.CaseJsonCodec;
 import ac.core.service.cases.CaseService;
 import ac.core.service.product.ProductCatalog;
+import ac.domain.casefile.CellTexts;
 import ac.core.service.settings.SettingsService;
 import ac.domain.casefile.ValidationIssue;
 import ac.domain.export.CsvFormatOptions;
@@ -26,6 +27,9 @@ import ac.domain.export.ManagedColumnScope;
 import ac.domain.product.FieldCodec;
 import ac.domain.product.FieldDef;
 import ac.domain.product.ProductSchema;
+import ac.domain.table.CsvTableReader;
+import ac.domain.table.RawRow;
+import ac.domain.table.RawTable;
 import ac.domain.table.WorkbookRecalculator;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -53,6 +57,8 @@ public class ExportService {
 
     private static final DateTimeFormatter FILE_STAMP = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
     public static final String KNOWN_TESTCASE_KEY = "_TestCaseId";
+    /** Upper bound of the rows returned by the preview endpoint. */
+    private static final int PREVIEW_MAX_ROWS = 500;
 
     private final CaseService caseService;
     private final TestCaseRepository caseRepository;
@@ -83,6 +89,11 @@ public class ExportService {
         this.baselines = baselines;
     }
 
+    /** Everything a request resolves once: options, output columns, overrides and the batch header. */
+    private record ResolvedCase(CsvFormatOptions options, List<Column> columns, Overlay overlay,
+            Recalculated recalculated, ImportBatchRow batch) {
+    }
+
     public ExportPrecheck precheck(String tenantId, ExportRequest request) {
         List<ValidationIssue> issues = new ArrayList<>();
         return precheck(tenantId, request, issues);
@@ -91,44 +102,64 @@ public class ExportService {
     /** Precheck that also reports the recalculation warnings it produced. */
     private ExportPrecheck precheck(String tenantId, ExportRequest request, List<ValidationIssue> issues) {
         Selection selection = select(tenantId, request);
-        CsvFormatOptions options = options(tenantId, request);
-        List<Column> columns = columns(tenantId, request, selection);
-        Recalculated recalculated = recalculate(tenantId, request, selection, issues);
+        return precheck(request, selection, resolve(tenantId, request, selection, issues), issues);
+    }
 
+    /**
+     * Resolves the request once: settings, columns, overrides, recalculation and the batch row.
+     *
+     * <p>The batch is looked up once instead of once per exported row, and the tenant export options
+     * are read once instead of once per helper.
+     */
+    private ResolvedCase resolve(String tenantId, ExportRequest request, Selection selection,
+            List<ValidationIssue> issues) {
+        CsvFormatOptions options = options(tenantId, request);
+        ImportBatchRow batch = request.batchId() == null ? null
+                : batchRepository.find(tenantId, request.batchId()).orElse(null);
+        List<Column> columns = columns(request, selection, options, batch);
+        Overlay overlay = overlay(tenantId, request, selection);
+        Recalculated recalculated = recalculate(tenantId, request, selection, overlay, issues);
+        return new ResolvedCase(options, columns, overlay, recalculated, batch);
+    }
+
+    private ExportPrecheck precheck(ExportRequest request, Selection selection, ResolvedCase resolved,
+            List<ValidationIssue> issues) {
         Set<String> keys = new LinkedHashSet<>();
         for (TestCaseRecord record : selection.records()) {
+            Values values = values(selection.schema(), record, resolved.overlay());
             for (FieldDef required : selection.schema().requiredFields()) {
-                Map<String, Object> data = json.toMap(record.dataJson());
-                Object value = data.get(required.key());
-                if (value == null || String.valueOf(value).isBlank()) {
+                String value = values.texts().trade(required.key());
+                if (value == null || value.isBlank()) {
                     issues.add(ValidationIssue.error("REQUIRED_VALUE_MISSING",
                                     "Required field '" + required.header() + "' is empty")
                             .atRow(record.rowNo()).forField(required.key()));
                 }
             }
-            if (record.keyValue() != null && !record.keyValue().isBlank()) {
-                if (!keys.add(record.keyValue())) {
-                    issues.add(ValidationIssue.error("KEY_DUPLICATE",
-                                    "Trade id '" + record.keyValue() + "' appears more than once")
-                            .atRow(record.rowNo()));
-                }
-            }
-            if (request.batchId() != null) {
-                batchRepository.find(tenantId, request.batchId())
-                        .filter(batch -> batch.schemaHash() != null
-                                && !batch.schemaHash().equals(selection.schema().schemaHash()))
-                        .ifPresent(batch -> issues.add(ValidationIssue.warn("SCHEMA_HASH_MISMATCH",
-                                "The product definition changed since this batch was imported")));
+            String keyValue = keyValue(selection.schema(), values.texts());
+            if (keyValue != null && !keyValue.isBlank() && !keys.add(keyValue)) {
+                issues.add(ValidationIssue.error("KEY_DUPLICATE",
+                                "Trade id '" + keyValue + "' appears more than once")
+                        .atRow(record.rowNo()));
             }
         }
+        ImportBatchRow batch = resolved.batch();
+        if (batch != null && batch.schemaHash() != null
+                && !batch.schemaHash().equals(selection.schema().schemaHash())) {
+            issues.add(ValidationIssue.warn("SCHEMA_HASH_MISMATCH",
+                    "The product definition changed since this batch was imported"));
+        }
 
+        List<Column> columns = resolved.columns();
         List<String> headers = columns.stream().map(Column::header).toList();
         TestCaseRecord first = selection.records().isEmpty() ? null : selection.records().get(0);
-        List<String> sample = first == null
-                ? List.of()
-                : columns.stream().map(column -> cellValue(selection.schema(),
-                        json.toMap(first.dataJson()), toStringMap(first), column,
-                        recalculated.values().getOrDefault(first.id(), Map.of()))).toList();
+        List<String> sample = List.of();
+        if (first != null) {
+            Values values = values(selection.schema(), first, resolved.overlay());
+            Map<String, String> computed = resolved.recalculated().values().getOrDefault(first.id(), Map.of());
+            sample = columns.stream()
+                    .map(column -> cellValue(selection.schema(), values.texts(), column, computed))
+                    .toList();
+        }
         boolean valid = issues.stream().noneMatch(issue -> issue.level() == ac.domain.casefile.IssueLevel.ERROR);
         return new ExportPrecheck(valid && !selection.records().isEmpty(), selection.records().size(),
                 headers, sample, issues);
@@ -141,18 +172,23 @@ public class ExportService {
             throw ApiException.invalid("Nothing to export");
         }
         // Precheck only validates stored values; recalculation runs once below, on the real content.
-        ExportPrecheck precheck = precheck(tenantId, new ExportRequest(request.batchId(),
-                request.caseIds(), request.options(), Boolean.FALSE));
+        List<ValidationIssue> precheckIssues = new ArrayList<>();
+        ExportRequest storedRequest = new ExportRequest(request.batchId(), request.caseIds(),
+                request.options(), Boolean.FALSE, request.overrides());
+        ExportPrecheck precheck = precheck(storedRequest, selection,
+                resolve(tenantId, storedRequest, selection, precheckIssues), precheckIssues);
         if (!precheck.valid()) {
             throw new ApiException(ac.core.common.ErrorCode.INVALID_REQUEST,
                     "Export precheck failed", Map.of("issues", precheck.issues()));
         }
 
-        CsvFormatOptions options = options(tenantId, request);
         List<ValidationIssue> issues = new ArrayList<>();
-        CsvContent content = content(tenantId, request, issues);
+        ResolvedCase resolved = resolve(tenantId, request, selection, issues);
+        CsvContent content = content(selection, resolved);
         List<String> headers = content.headers();
         List<List<String>> rows = content.rows();
+        List<ExportResult.ExportOverrideView> overrides = overrideViews(resolved.overlay());
+        CsvFormatOptions options = resolved.options();
 
         LocalDate today = LocalDate.now(TimeProvider.DISPLAY_ZONE);
         String fileName = "%s_%s_%s.csv".formatted(selection.schema().code(),
@@ -164,14 +200,18 @@ public class ExportService {
         try (BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
             CsvWriter.write(writer, options, headers, rows);
         } catch (IOException e) {
+            deleteQuietly(temp);
+            log.warn("Cannot write export file {}", target, e);
             throw new ApiException(ac.core.common.ErrorCode.INTERNAL_ERROR,
-                    "Cannot write export file: " + e.getMessage());
+                    "The export file could not be written, check the free space of the data directory");
         }
         try {
             Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
+            deleteQuietly(temp);
+            log.warn("Cannot finalize export file {}", target, e);
             throw new ApiException(ac.core.common.ErrorCode.INTERNAL_ERROR,
-                    "Cannot finalize export file: " + e.getMessage());
+                    "The export file could not be finalized, check the free space of the data directory");
         }
 
         long size;
@@ -181,20 +221,25 @@ public class ExportService {
             size = 0;
         }
         String exportId = Ids.newId();
+        String scopeBatchId = request.batchId() != null ? request.batchId() : selectionBatchId(selection);
         String relativePath = dataLayout.tenantRoot(tenantId).relativize(target).toString().replace('\\', '/');
+        Map<String, Object> storedOptions = new LinkedHashMap<>();
+        storedOptions.put("delimiter", String.valueOf(options.delimiter()));
+        storedOptions.put("quoteAll", options.quoteAll());
+        storedOptions.put("managedColumns", options.managedColumns().name());
+        storedOptions.put("bom", options.bom());
+        storedOptions.put("lineEnding", options.lineEnding().equals("\n") ? "LF" : "CRLF");
+        if (!overrides.isEmpty()) {
+            storedOptions.put("overrides", overrides);
+        }
         ExportJobRow job = new ExportJobRow(exportId, tenantId, selection.schema().code(),
-                request.batchId() != null ? "BATCH" : "SELECTION", request.batchId(), rows.size(), fileName,
-                relativePath, size, json.toJson(Map.of(
-                        "delimiter", String.valueOf(options.delimiter()),
-                        "quoteAll", options.quoteAll(),
-                        "managedColumns", options.managedColumns().name(),
-                        "bom", options.bom(),
-                        "lineEnding", options.lineEnding().equals("\n") ? "LF" : "CRLF")),
-                "COMPLETED", null, "system", time.nowUtc());
+                request.batchId() != null ? "BATCH" : "SELECTION", scopeBatchId, rows.size(), fileName,
+                relativePath, size, json.toJson(storedOptions),
+                "COMPLETED", null, null, "system", time.nowUtc());
         exportRepository.insert(job);
 
         return new ExportResult(exportId, fileName, rows.size(), size, TimeProvider.display(job.createdAt()),
-                issues.stream().map(ValidationIssue::message).toList());
+                issues.stream().map(ValidationIssue::message).toList(), overrides);
     }
 
     public PageResult<ExportJobRow> history(String tenantId, PageQuery page) {
@@ -230,6 +275,15 @@ public class ExportService {
         exportRepository.delete(tenantId, exportId);
     }
 
+    /** Replaces the remark of one export record; an empty text clears it. */
+    @Transactional
+    public String updateNote(String tenantId, String exportId, String rawNote) {
+        requireJob(tenantId, exportId);
+        String note = ac.core.common.Notes.normalize(rawNote);
+        exportRepository.updateNote(tenantId, exportId, note);
+        return note;
+    }
+
     public ExportJobRow requireJob(String tenantId, String exportId) {
         return exportRepository.find(tenantId, exportId)
                 .orElseThrow(() -> ApiException.notFound("Export " + exportId + " does not exist"));
@@ -245,8 +299,54 @@ public class ExportService {
         return path;
     }
 
+    /**
+     * Preview of the stored CSV: the header row plus the first data rows.
+     *
+     * <p>The file is parsed with the delimiter and quoting it was written with, so the preview always
+     * matches the downloadable file. Large exports are truncated instead of being rejected.
+     *
+     * @param limit maximum number of data rows to return, capped at {@value #PREVIEW_MAX_ROWS}
+     */
+    public ExportPreview preview(String tenantId, String exportId, int limit) {
+        ExportJobRow job = requireJob(tenantId, exportId);
+        Path path = requireFile(tenantId, exportId);
+        int wanted = Math.max(1, Math.min(limit, PREVIEW_MAX_ROWS));
+        RawTable table;
+        try {
+            table = CsvTableReader.readLimited(path, wanted + 2);
+        } catch (RuntimeException e) {
+            throw new ApiException(ac.core.common.ErrorCode.INTERNAL_ERROR,
+                    "Cannot read the export file: " + e.getMessage());
+        }
+        List<String> headers = table.rowCount() == 0 ? List.of() : table.headerTexts(0);
+        int available = Math.max(0, table.rowCount() - 1);
+        int shown = Math.min(available, wanted);
+        List<List<String>> rows = new ArrayList<>(shown);
+        for (int index = 0; index < shown; index++) {
+            RawRow row = table.row(index + 1);
+            List<String> cells = new ArrayList<>(headers.size());
+            for (int column = 0; column < headers.size(); column++) {
+                cells.add(row.text(column));
+            }
+            rows.add(cells);
+        }
+        return new ExportPreview(exportId, job.fileName(), job.rowCount(), shown, job.rowCount() > shown,
+                headers, rows);
+    }
+
+    /** Preview payload of one export record. */
+    public record ExportPreview(String exportId, String fileName, int rowCount, int shownRows,
+            boolean truncated, List<String> headers, List<List<String>> rows) {
+
+        public ExportPreview {
+            headers = List.copyOf(headers);
+            rows = rows.stream().map(cells -> List.copyOf(cells)).toList();
+        }
+    }
+
     private CsvFormatOptions options(String tenantId, ExportRequest request) {
-        return request.options() != null ? request.options() : settings.exportOptions(tenantId);
+        CsvFormatOptions defaults = settings.exportOptions(tenantId);
+        return request.options() == null ? defaults : request.options().merge(defaults);
     }
 
     /**
@@ -265,22 +365,24 @@ public class ExportService {
 
     /**
      * Rendered CSV content, optionally with freshly recalculated formula values.
-     *
-     * @param issues collects recalculation warnings so callers can surface them
      */
     public CsvContent content(String tenantId, ExportRequest request, List<ValidationIssue> issues) {
         Selection selection = select(tenantId, request);
-        List<Column> columns = columns(tenantId, request, selection);
+        return content(selection, resolve(tenantId, request, selection, issues));
+    }
+
+    /** Rendered CSV content of an already resolved request. */
+    private CsvContent content(Selection selection, ResolvedCase resolved) {
+        List<Column> columns = resolved.columns();
         List<String> headers = columns.stream().map(Column::header).toList();
-        Recalculated recalculated = recalculate(tenantId, request, selection, issues);
         List<List<String>> rows = new ArrayList<>(selection.records().size());
         for (TestCaseRecord record : selection.records()) {
-            Map<String, Object> data = json.toMap(record.dataJson());
-            Map<String, String> managed = toStringMap(record);
-            Map<String, String> computed = recalculated.values().getOrDefault(record.id(), Map.of());
+            Values values = values(selection.schema(), record, resolved.overlay());
+            Map<String, String> computed =
+                    resolved.recalculated().values().getOrDefault(record.id(), Map.of());
             List<String> row = new ArrayList<>(columns.size());
             for (Column column : columns) {
-                row.add(cellValue(selection.schema(), data, managed, column, computed));
+                row.add(cellValue(selection.schema(), values.texts(), column, computed));
             }
             rows.add(row);
         }
@@ -324,11 +426,23 @@ public class ExportService {
                 .orElseThrow(() -> ApiException.notFound("Batch does not exist"));
     }
 
-    private List<Column> columns(String tenantId, ExportRequest request, Selection selection) {
-        ManagedColumnScope scope = options(tenantId, request).managedColumns();
+    /**
+     * Batch behind a case selection, {@code null} when the selected cases span several batches.
+     *
+     * <p>Kept on the record so the export list can link back to the batch it came from.
+     */
+    private String selectionBatchId(Selection selection) {
+        Set<String> batchIds = new LinkedHashSet<>();
+        selection.records().forEach(record -> batchIds.add(record.batchId()));
+        return batchIds.size() == 1 ? batchIds.iterator().next() : null;
+    }
+
+    private List<Column> columns(ExportRequest request, Selection selection, CsvFormatOptions options,
+            ImportBatchRow batch) {
+        ManagedColumnScope scope = options.managedColumns();
         List<Column> columns = new ArrayList<>();
         if (scope == ManagedColumnScope.ALL) {
-            appendSourceOrder(columns, tenantId, request, selection);
+            appendSourceOrder(columns, batch, selection);
             return columns;
         }
         for (FieldDef field : selection.schema().tradeFields()) {
@@ -345,29 +459,27 @@ public class ExportService {
         return columns;
     }
 
-    private void appendSourceOrder(List<Column> columns, String tenantId, ExportRequest request,
-            Selection selection) {
+    private void appendSourceOrder(List<Column> columns, ImportBatchRow batch, Selection selection) {
         Map<String, Column> managed = new LinkedHashMap<>();
         Set<String> emitted = new LinkedHashSet<>();
-        if (request.batchId() != null) {
-            batchRepository.find(tenantId, request.batchId()).ifPresent(batch -> {
-                for (Object item : json.toList(batch.columnMappingJson() == null ? "[]" : batch.columnMappingJson())) {
-                    if (item instanceof Map<?, ?> map) {
-                        String kind = String.valueOf(map.get("kind"));
-                        String header = map.get("header") == null ? "" : String.valueOf(map.get("header"));
-                        String managedKey = map.get("managedKey") == null ? null : String.valueOf(map.get("managedKey"));
-                        String fieldKey = map.get("fieldKey") == null ? null : String.valueOf(map.get("fieldKey"));
-                        if ("MANAGED".equals(kind) && managedKey != null) {
-                            columns.add(Column.managed(header.isBlank() ? managedKey : header, managedKey));
-                        } else if ("TRADE".equals(kind) && fieldKey != null && emitted.add(fieldKey)) {
-                            FieldDef field = selection.schema().byKey().get(fieldKey);
-                            if (field != null) {
-                                columns.add(Column.trade(field));
-                            }
+        if (batch != null) {
+            for (Object item : json.toList(
+                    batch.columnMappingJson() == null ? "[]" : batch.columnMappingJson())) {
+                if (item instanceof Map<?, ?> map) {
+                    String kind = String.valueOf(map.get("kind"));
+                    String header = map.get("header") == null ? "" : String.valueOf(map.get("header"));
+                    String managedKey = map.get("managedKey") == null ? null : String.valueOf(map.get("managedKey"));
+                    String fieldKey = map.get("fieldKey") == null ? null : String.valueOf(map.get("fieldKey"));
+                    if ("MANAGED".equals(kind) && managedKey != null) {
+                        columns.add(Column.managed(header.isBlank() ? managedKey : header, managedKey));
+                    } else if ("TRADE".equals(kind) && fieldKey != null && emitted.add(fieldKey)) {
+                        FieldDef field = selection.schema().byKey().get(fieldKey);
+                        if (field != null) {
+                            columns.add(Column.trade(field));
                         }
                     }
                 }
-            });
+            }
             if (!columns.isEmpty()) {
                 return;
             }
@@ -389,19 +501,106 @@ public class ExportService {
         return result;
     }
 
+    private static void deleteQuietly(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            log.debug("Cannot delete temporary export file {}", file, e);
+        }
+    }
+
     private record Selection(ProductSchema schema, List<TestCaseRecord> records) {
     }
 
-    private String cellValue(ProductSchema schema, Map<String, Object> data, Map<String, String> managed,
-            Column column, Map<String, String> computed) {
+    private String cellValue(ProductSchema schema, CellTexts texts, Column column,
+            Map<String, String> computed) {
         if (column.managedKey() != null) {
-            return managed.getOrDefault(column.managedKey(), "");
+            return nullToEmpty(texts.managedValue(column.managedKey()));
         }
         if (computed.containsKey(column.fieldKey())) {
             return computed.get(column.fieldKey());
         }
-        Object value = data.get(column.fieldKey());
-        return value == null ? "" : codec.displayValue(schema, column.fieldKey(), value);
+        return nullToEmpty(texts.trade(column.fieldKey()));
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    // ---------------------------------------------------------- transient overrides
+
+    /**
+     * Resolves the transient overrides of one request against the product of the selection.
+     *
+     * <p>The same rules as a bulk update apply, plus one export specific guard: overriding the unique
+     * key of more than one exported row would produce duplicate trade ids, which is refused up front.
+     */
+    private Overlay overlay(String tenantId, ExportRequest request, Selection selection) {
+        if (!request.hasOverrides()) {
+            return Overlay.NONE;
+        }
+        Map<String, CaseService.ResolvedOverride> byField = new LinkedHashMap<>();
+        for (ac.core.service.cases.FieldOverride override : request.overrides()) {
+            CaseService.ResolvedOverride resolved = caseService.resolveOverride(tenantId,
+                    selection.schema(), override);
+            byField.put(resolved.fieldKey(), resolved);
+        }
+        FieldDef uniqueField = selection.schema().uniqueField();
+        if (uniqueField != null && byField.containsKey(uniqueField.key()) && selection.records().size() > 1) {
+            CaseService.ResolvedOverride resolved = byField.get(uniqueField.key());
+            if (resolved.mode() == ac.core.service.cases.BulkFieldUpdateRequest.Mode.FORMULA) {
+                throw new ApiException(ac.core.common.ErrorCode.CONFLICT,
+                        "The key field '" + uniqueField.header() + "' cannot hold a formula");
+            }
+            throw new ApiException(ac.core.common.ErrorCode.CONFLICT,
+                    "Overriding the key field '" + uniqueField.header() + "' on "
+                            + selection.records().size() + " exported cases would create duplicate keys");
+        }
+        return new Overlay(List.copyOf(byField.values()));
+    }
+
+    /** Case values with the transient overrides applied; nothing here touches the database. */
+    private Values values(ProductSchema schema, TestCaseRecord record, Overlay overlay) {
+        Map<String, Object> data = new LinkedHashMap<>(json.toMap(record.dataJson()));
+        Map<String, String> managed = toStringMap(record);
+        Map<String, String> formulas = new LinkedHashMap<>(codec.tradeFormulas(record.formulaJson()));
+        formulas.putAll(codec.managedFormulas(record.formulaJson()));
+        CellTexts stored = codec.texts(record);
+        Map<String, String> rawData = new LinkedHashMap<>(stored.data());
+        Map<String, String> rawManaged = new LinkedHashMap<>(stored.managed());
+        for (CaseService.ResolvedOverride resolved : overlay.items()) {
+            caseService.applyOverride(resolved, schema, data, managed, formulas, rawData, rawManaged);
+        }
+        return new Values(data, managed, formulas, CellTexts.of(data, managed,
+                new CellTexts(rawData, rawManaged)));
+    }
+
+    private List<ExportResult.ExportOverrideView> overrideViews(Overlay overlay) {
+        return overlay.items().stream()
+                .map(resolved -> new ExportResult.ExportOverrideView(resolved.fieldKey(),
+                        resolved.field().header(), resolved.mode().name(),
+                        caseService.overrideDisplay(resolved)))
+                .toList();
+    }
+
+    private String keyValue(ProductSchema schema, CellTexts texts) {
+        FieldDef uniqueField = schema.uniqueField();
+        if (uniqueField == null) {
+            return null;
+        }
+        String text = texts.trade(uniqueField.key());
+        return text == null || text.isBlank() ? null : FieldCodec.canonical(uniqueField, text);
+    }
+
+    /** Resolved overrides of one request, in the order the caller provided them. */
+    private record Overlay(List<CaseService.ResolvedOverride> items) {
+
+        static final Overlay NONE = new Overlay(List.of());
+    }
+
+    /** In-memory case values after the overrides were applied. */
+    private record Values(Map<String, Object> data, Map<String, String> managed,
+            Map<String, String> formulas, CellTexts texts) {
     }
 
     // ------------------------------------------------------------ recalculation
@@ -414,11 +613,15 @@ public class ExportService {
      * their cells. Results replace the stored values only for the cells that actually computed.
      */
     private Recalculated recalculate(String tenantId, ExportRequest request, Selection selection,
-            List<ValidationIssue> issues) {
+            Overlay overlay, List<ValidationIssue> issues) {
         if (!request.recalculateEnabled() || selection.records().isEmpty()) {
             return Recalculated.NONE;
         }
-        if (selection.records().stream().noneMatch(record -> record.formulaCount() > 0)) {
+        // an overridden formula must be recalculated even when no stored formula is left on the row
+        boolean overrideFormulas = overlay.items().stream().anyMatch(
+                resolved -> resolved.mode() == ac.core.service.cases.BulkFieldUpdateRequest.Mode.FORMULA);
+        if (!overrideFormulas
+                && selection.records().stream().noneMatch(record -> record.formulaCount() > 0)) {
             return Recalculated.NONE;
         }
         Set<String> batchIds = new LinkedHashSet<>();
@@ -440,7 +643,7 @@ public class ExportService {
             return Recalculated.NONE;
         }
 
-        List<WorkbookRecalculator.CaseTarget> targets = caseTargets(selection, batch);
+        List<WorkbookRecalculator.CaseTarget> targets = caseTargets(selection, batch, overlay);
         WorkbookRecalculator.Result result = WorkbookRecalculator.recalculate(baseline,
                 batch.sheetName(), targets);
         result.warnings().stream().limit(20).forEach(message -> issues.add(
@@ -456,16 +659,18 @@ public class ExportService {
     }
 
     /** Builds the write-back plan from the batch column mapping and the current case values. */
-    private List<WorkbookRecalculator.CaseTarget> caseTargets(Selection selection, ImportBatchRow batch) {
+    private List<WorkbookRecalculator.CaseTarget> caseTargets(Selection selection, ImportBatchRow batch,
+            Overlay overlay) {
         List<MappingEntry> mapping = mappingEntries(batch);
         List<WorkbookRecalculator.CaseTarget> targets = new ArrayList<>(selection.records().size());
         for (TestCaseRecord record : selection.records()) {
             if (record.sourceRow() == null) {
                 continue;
             }
-            Map<String, Object> data = json.toMap(record.dataJson());
-            Map<String, String> managed = toStringMap(record);
-            Map<String, String> formulas = codec.tradeFormulas(record.formulaJson());
+            Values values = values(selection.schema(), record, overlay);
+            Map<String, Object> data = values.data();
+            Map<String, String> managed = values.managed();
+            Map<String, String> formulas = values.formulas();
             List<WorkbookRecalculator.CellTarget> cells = new ArrayList<>(mapping.size());
             for (MappingEntry entry : mapping) {
                 String formula = entry.fieldKey == null ? null : formulas.get(entry.fieldKey);

@@ -80,7 +80,7 @@ class CatalogSearchTest extends AbstractIntegrationTest {
         assertThat(simplified.ok()).as(simplified.body()).isTrue();
         JsonNode zh = simplified.json();
         assertThat(zh.get("locale").asString()).startsWith("zh");
-        assertThat(zh.get("messages").get("app.title").asString()).contains("测试数据");
+        assertThat(zh.get("messages").get("app.title").asString()).contains("Tabular");
         assertThat(zh.get("messages").get("products.column.header").asString()).isEqualTo("列名");
 
         var hongKong = api.get("/api/i18n?lang=zh-HK");
@@ -97,6 +97,6 @@ class CatalogSearchTest extends AbstractIntegrationTest {
         var page = api.get("/products?lang=en");
         assertThat(page.status()).isEqualTo(200);
         assertThat(page.body()).contains("Product field definition");
-        assertThat(page.body()).contains("Field meta");
+        assertThat(page.body()).contains("Metadata");
     }
 }

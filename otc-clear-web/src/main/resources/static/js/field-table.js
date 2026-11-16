@@ -430,16 +430,13 @@ export function createFieldTable(config) {
 
   // ---------------------------------------------------------------- events
 
-  let searchTimer = null;
+  const debouncedFilter = ui.debounce(() => renderRows(), 150);
 
   function bindFilters() {
     const search = node('search');
     search?.addEventListener('input', () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => {
-        state.filters.query = search.value.trim();
-        renderRows();
-      }, 150);
+      state.filters.query = search.value.trim();
+      debouncedFilter();
     });
     node('type')?.addEventListener('change', (event) => {
       state.filters.valueType = event.target.value;

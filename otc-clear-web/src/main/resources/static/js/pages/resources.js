@@ -3,6 +3,20 @@ import * as ui from '../ui.js';
 
 /* Resource statistics: file areas, database rows and JVM state of the bound tenant. */
 
+/** Whether the tenant identifier may be shown; comes from {@code app.ui.show-tenant}. */
+let showTenant = false;
+
+/**
+ * Replaces the tenant directory segment of a path or JDBC URL.
+ *
+ * <p>With the tenant hidden the identifier must not leak through a path, while the rest of the
+ * path keeps its diagnostic value.
+ */
+function maskTenant(text) {
+  const value = text === null || text === undefined ? '' : String(text);
+  return showTenant ? value : value.replace(/([\\/])tenants\1[^\\/]+/gi, '$1tenants$1***');
+}
+
 function percent(part, whole) {
   if (!whole || whole <= 0) {
     return 0;
@@ -47,8 +61,9 @@ function cardBar(part, whole, tone = '') {
 function renderCards(stats) {
   const diskUsed = Math.max(0, stats.diskTotalBytes - stats.diskFreeBytes);
   const heapPercent = percent(stats.runtime.heapUsedBytes, stats.runtime.heapMaxBytes);
+  const tenantSuffix = showTenant ? ` · ${ui.escapeHtml(stats.tenantId)}` : '';
   const cards = [
-    card('数据目录占用', ui.bytes(stats.totalBytes), `${stats.totalFiles} 个文件 · ${ui.escapeHtml(stats.tenantId)}`),
+    card('数据目录占用', ui.bytes(stats.totalBytes), `${stats.totalFiles} 个文件${tenantSuffix}`),
   ];
   if (stats.metrics.disk) {
     cards.push(card('磁盘可用', ui.bytes(stats.diskFreeBytes),
@@ -59,7 +74,7 @@ function renderCards(stats) {
     card('数据库文件', ui.bytes(stats.database.fileBytes),
       `${stats.database.files} 个文件 · ${ui.escapeHtml(stats.database.display)}`),
     card('数据库总行数', stats.database.totalRows.toLocaleString('zh-CN'),
-      `${stats.database.tables.length} 张业务表（当前租户）`));
+      `${stats.database.tables.length} 张业务表（${showTenant ? '当前租户' : '本实例'}）`));
   if (stats.metrics.heap) {
     cards.push(card('堆内存', `${ui.bytes(stats.runtime.heapUsedBytes)} / ${ui.bytes(stats.runtime.heapMaxBytes)}`,
       `线程 ${stats.runtime.threads} · 运行 ${duration(stats.runtime.uptimeSeconds)}`,
@@ -67,13 +82,13 @@ function renderCards(stats) {
   }
   ui.setHtml('resCards', cards.join(''));
   ui.setHtml('resGenerated', `生成于 ${ui.escapeHtml(stats.generatedAt)}`);
-  ui.setHtml('resTenantPath', ui.escapeHtml(stats.tenantPath));
+  ui.setHtml('resTenantPath', ui.escapeHtml(maskTenant(stats.tenantPath)));
 }
 
 function renderAreas(stats) {
   const rows = stats.areas.map((area) => `
     <tr>
-      <td>${ui.escapeHtml(area.name)}<div class="mono-sm">${ui.escapeHtml(area.path)}</div></td>
+      <td>${ui.escapeHtml(area.name)}<div class="mono-sm">${ui.escapeHtml(maskTenant(area.path))}</div></td>
       <td class="num">${area.files}</td>
       <td class="num">${ui.bytes(area.bytes)}</td>
       <td class="res-cell-bar">${bar(area.bytes, stats.totalBytes)}</td>
@@ -87,7 +102,8 @@ function renderAreas(stats) {
 function renderDatabase(stats) {
   const database = stats.database;
   ui.setHtml('resDatabaseInfo',
-    `${ui.escapeHtml(database.display)} · ${ui.escapeHtml(database.url)} · ${ui.bytes(database.fileBytes)}`);
+    `${ui.escapeHtml(database.display)} · ${ui.escapeHtml(maskTenant(database.url))} · ${
+      ui.bytes(database.fileBytes)}`);
   const maxRows = Math.max(1, ...database.tables.map((table) => table.rows));
   const rows = database.tables.map((table) => `
     <tr>
@@ -127,7 +143,8 @@ async function load() {
 }
 
 async function init() {
-  await ui.initShell();
+  const ctx = await ui.initShell();
+  showTenant = ctx?.showTenant === true;
   await load();
   ui.enableColumnResize(ui.byId('resAreaTable'), 'resources-areas');
   ui.enableColumnResize(ui.byId('resTableTable'), 'resources-tables');

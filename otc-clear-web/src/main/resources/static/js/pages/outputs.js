@@ -3,13 +3,8 @@ import * as ui from '../ui.js';
 
 const state = { page: 1, size: 25, jobId: '' };
 
-function debounce(fn, delay = 350) {
-  let timer = null;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
-}
+/** Shared debounce; the page keeps its own default delay. */
+const debounce = (fn, delay = 350) => ui.debounce(fn, delay);
 
 async function load() {
   try {
@@ -26,8 +21,8 @@ async function load() {
         <td class="mono">${ui.escapeHtml(output.discoveredAt)}</td>
         <td class="muted" style="font-size:12px">${ui.escapeHtml(output.message || '')}</td>
         <td><div class="row-actions">
-          <a class="tool-btn small" href="/outputs/${encodeURIComponent(output.id)}">查看</a>
-          <button class="tool-btn small danger" data-delete="${ui.escapeHtml(output.id)}">删除</button>
+          ${ui.iconLink('eye', `/outputs/${encodeURIComponent(output.id)}`, '查看产出详情', 'sm')}
+          ${ui.iconButton('trash', '删除产出', 'sm danger', `data-delete="${ui.escapeHtml(output.id)}"`)}
         </div></td>
       </tr>`);
     ui.setHtml('outputRows', rows.length ? rows.join('')

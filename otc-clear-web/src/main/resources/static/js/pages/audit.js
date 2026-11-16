@@ -6,11 +6,12 @@ import * as ui from '../ui.js';
 const state = {
   module: '', entityType: '', action: '', q: '', from: '', to: '', page: 1, size: 25,
   expanded: new Set(),
+  items: new Map(),
 };
 
 const MODULE_LABELS = {
   PRODUCT_DEFINITION: '产品定义',
-  META_DICTIONARY: '字段元信息',
+  META_DICTIONARY: '元数据',
   TASK: '任务（历史）',
   BATCH: '批次（历史）',
   CASE: '用例（历史）',
@@ -72,13 +73,8 @@ function actionLabel(code) {
   return ACTION_LABELS[code] || code || '—';
 }
 
-function debounce(fn, delay = 350) {
-  let timer = null;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
-}
+/** Shared debounce; the page keeps its own default delay. */
+const debounce = (fn, delay = 350) => ui.debounce(fn, delay);
 
 function filterParams() {
   return {
@@ -189,11 +185,12 @@ function prettyDetail(detail) {
 async function load() {
   try {
     const result = await get('/api/audit' + query({ ...filterParams(), page: state.page, size: state.size }));
+    state.items = new Map(result.items.map((item) => [item.id, item]));
     ui.setHtml('auditRows', result.items.length ? result.items.map(rowHtml).join('')
       : '<tr><td colspan="6" class="empty">没有匹配的审计记录</td></tr>');
     ui.setHtml('auditTotal', `共 ${result.total} 条`);
     ui.byId('auditRows').querySelectorAll('button[data-toggle]').forEach((button) => {
-      button.addEventListener('click', () => toggle(button.dataset.toggle));
+      button.addEventListener('click', () => toggle(button.dataset.toggle, button));
     });
     ui.renderPager('auditPager', result.page, result.totalPages, result.total, (page) => {
       state.page = page;
@@ -204,13 +201,39 @@ async function load() {
   }
 }
 
-function toggle(id) {
-  if (state.expanded.has(id)) {
+function toggle(id, button) {
+  const expanded = state.expanded.has(id);
+  if (expanded) {
     state.expanded.delete(id);
   } else {
     state.expanded.add(id);
   }
-  load();
+  // the detail row is inserted next to the clicked row: reloading the whole page would lose the
+  // scroll position and the focus of the user
+  const row = button ? button.closest('tr') : ui.byId('auditRows')
+    .querySelector(`tr[data-audit="${id}"]`);
+  if (!row) {
+    load();
+    return;
+  }
+  row.classList.toggle('row-open', !expanded);
+  const detailRow = row.nextElementSibling;
+  if (expanded) {
+    if (detailRow && detailRow.classList.contains('audit-detail-row')) {
+      detailRow.remove();
+    }
+    return;
+  }
+  const item = state.items && state.items.get(id);
+  if (!item) {
+    load();
+    return;
+  }
+  const inserted = document.createElement('tr');
+  inserted.className = 'audit-detail-row';
+  inserted.innerHTML = `<td colspan="6"><pre class="audit-detail">${
+    ui.escapeHtml(prettyDetail(item.detail))}</pre></td>`;
+  row.after(inserted);
 }
 
 function reload() {

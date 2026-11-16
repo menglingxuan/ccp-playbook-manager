@@ -3,7 +3,7 @@
 <head th:fragment="head(pageTitle)">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title th:text="${pageTitle} + ' · ' + #{app.title}">OTC Clear 测试数据管理平台</title>
+  <title th:text="${pageTitle} + ' · ' + #{app.title}">Tabular 结构化文本数据管理工具</title>
   <link rel="stylesheet" th:href="@{/css/theme.css}">
   <link rel="stylesheet" th:href="@{/css/app.css}">
 </head>
@@ -12,11 +12,11 @@
 <header th:fragment="topbar(active)" class="topbar">
   <div class="topbar-inner">
     <div class="topbar-left">
-      <div class="topbar-title" th:text="#{app.title}">OTC Clear 测试数据管理平台</div>
+      <div class="topbar-title" th:text="#{app.title}">Tabular 结构化文本数据管理工具</div>
       <div class="topbar-sub" id="ctxSub" th:text="#{common.loading}">加载中…</div>
     </div>
     <div class="topbar-right">
-      <span class="env-badge" id="ctxBadge">…</span>
+      <span class="env-badge" id="ctxBadge" th:if="${showTenant}">…</span>
       <select class="top-select" id="langSelect" th:title="#{shell.language}" aria-label="Language">
         <option value="zh-CN" th:text="#{lang.zh-CN}">简体中文</option>
         <option value="zh-HK" th:text="#{lang.zh-HK}">简体中文（香港）</option>
@@ -40,19 +40,19 @@
   <nav class="nav" aria-label="Main">
     <div class="nav-inner">
       <a class="nav-link" th:classappend="${active == 'tasks' ? 'active' : ''}" th:href="@{/}"
-         th:text="#{nav.tasks}">任务面板</a>
+         th:text="#{nav.tasks}">任务管理</a>
       <a class="nav-link" th:classappend="${active == 'import' ? 'active' : ''}" th:href="@{/import}"
          th:text="#{nav.import}">导入向导</a>
       <a class="nav-link" th:classappend="${active == 'batches' ? 'active' : ''}" th:href="@{/batches}"
          th:text="#{nav.batches}">批次浏览</a>
       <a class="nav-link" th:classappend="${active == 'exports' ? 'active' : ''}" th:href="@{/exports}"
-         th:text="#{nav.exports}">导出管理</a>
+         th:text="#{nav.exports}">导出记录</a>
       <a class="nav-link" th:classappend="${active == 'outputs' ? 'active' : ''}" th:href="@{/outputs}"
          th:text="#{nav.outputs}">外部任务</a>
       <a class="nav-link" th:classappend="${active == 'products' ? 'active' : ''}" th:href="@{/products}"
          th:text="#{nav.products}">产品定义</a>
       <a class="nav-link" th:classappend="${active == 'meta' ? 'active' : ''}" th:href="@{/meta}"
-         th:text="#{nav.meta}">字段元信息</a>
+         th:text="#{nav.meta}">元数据</a>
       <a class="nav-link" th:classappend="${active == 'resources' ? 'active' : ''}" th:href="@{/resources}"
          th:text="#{nav.resources}">资源统计</a>
       <a class="nav-link" th:if="${auditEnabled}" th:classappend="${active == 'audit' ? 'active' : ''}"

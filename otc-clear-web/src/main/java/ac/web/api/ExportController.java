@@ -20,6 +20,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -97,6 +98,22 @@ public class ExportController {
         } catch (java.time.format.DateTimeParseException e) {
             throw ac.core.common.ApiException.invalid("Invalid date '" + value + "', expected yyyy-MM-dd");
         }
+    }
+
+    /** Sets or clears the free text remark of an export record. */
+    @PatchMapping("/{id}/note")
+    public Map<String, Object> note(@PathVariable String id, @RequestBody Map<String, String> body) {
+        String note = exportService.updateNote(tenantProvider.tenantId(), id, body.get("note"));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", id);
+        result.put("note", note);
+        return result;
+    }
+
+    /** Preview of a stored export: header row plus the first data rows. */
+    @GetMapping("/{id}/preview")    public ExportService.ExportPreview preview(@PathVariable String id,
+            @RequestParam(required = false, name = "limit", defaultValue = "100") int limit) {
+        return exportService.preview(tenantProvider.tenantId(), id, limit);
     }
 
     @GetMapping("/{id}/download")

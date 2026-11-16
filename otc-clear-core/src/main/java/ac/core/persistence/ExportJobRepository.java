@@ -2,6 +2,7 @@ package ac.core.persistence;
 
 import ac.core.common.PageQuery;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +16,7 @@ public class ExportJobRepository {
 
     private static final String COLUMNS = """
             id, tenant_id, product_code, scope_type, batch_id, row_count, file_name, storage_path, file_size,
-            options_json, status, message, created_by, created_at
+            options_json, status, message, note, created_by, created_at
             """;
 
     private final JdbcClient jdbc;
@@ -27,9 +28,9 @@ public class ExportJobRepository {
     public void insert(ExportJobRow row) {
         jdbc.sql("""
                         INSERT INTO export_job (id, tenant_id, product_code, scope_type, batch_id, row_count,
-                            file_name, storage_path, file_size, options_json, status, message, created_by, created_at)
+                            file_name, storage_path, file_size, options_json, status, message, note, created_by, created_at)
                         VALUES (:id, :tenantId, :productCode, :scopeType, :batchId, :rowCount, :fileName,
-                            :storagePath, :fileSize, :optionsJson, :status, :message, :createdBy, :createdAt)
+                            :storagePath, :fileSize, :optionsJson, :status, :message, :note, :createdBy, :createdAt)
                         """)
                 .param("id", row.id())
                 .param("tenantId", row.tenantId())
@@ -42,7 +43,7 @@ public class ExportJobRepository {
                 .param("fileSize", row.fileSize())
                 .param("optionsJson", row.optionsJson())
                 .param("status", row.status())
-                .param("message", row.message())
+                .param("message", row.message()).param("note", row.note())
                 .param("createdBy", row.createdBy())
                 .param("createdAt", row.createdAt())
                 .update();
@@ -82,6 +83,23 @@ public class ExportJobRepository {
     public void delete(String tenantId, String id) {
         jdbc.sql("DELETE FROM export_job WHERE tenant_id = :tenantId AND id = :id")
                 .param("tenantId", tenantId).param("id", id).update();
+    }
+
+    /** Every export made from the given batches, used when a task is purged. */
+    public List<ExportJobRow> listByBatchIds(String tenantId, Collection<String> batchIds) {
+        if (batchIds == null || batchIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("SELECT " + COLUMNS + " FROM export_job WHERE tenant_id = :tenantId"
+                + " AND batch_id IN (:batchIds)")
+                .param("tenantId", tenantId).param("batchIds", batchIds)
+                .query(this::map).list();
+    }
+
+    /** Replaces the free text remark of one export; {@code null} clears it. */
+    public void updateNote(String tenantId, String id, String note) {
+        jdbc.sql("UPDATE export_job SET note = :note WHERE tenant_id = :tenantId AND id = :id")
+                .param("tenantId", tenantId).param("id", id).param("note", note).update();
     }
 
     private String whereClause(String tenantId, ExportFilter filter, Map<String, Object> params) {
@@ -143,6 +161,7 @@ public class ExportJobRepository {
                 rs.getString("options_json"),
                 rs.getString("status"),
                 rs.getString("message"),
+            rs.getString("note"),
                 rs.getString("created_by"),
                 rs.getObject("created_at", LocalDateTime.class));
     }

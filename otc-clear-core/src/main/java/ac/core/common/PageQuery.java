@@ -18,6 +18,7 @@ public record PageQuery(int page, int size) {
     }
 
     public int offset() {
-        return (page - 1) * size;
+        long value = (long) (page - 1) * size;
+        return (int) Math.min(value, Integer.MAX_VALUE);
     }
 }

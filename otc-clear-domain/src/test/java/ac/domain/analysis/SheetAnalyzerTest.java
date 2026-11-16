@@ -48,7 +48,8 @@ class SheetAnalyzerTest {
         assertThat(preview.layout().assignmentsOf(ColumnKind.UNMAPPED)).extracting(ColumnAssignment::header)
                 .containsExactly("_TestCaseId");
         assertThat(preview.sampleRows()).hasSize(2);
-        assertThat(preview.sampleRows().get(0).values()).containsEntry("tradeId", "T-1");
+        // text fields keep no normalized copy, the original text is the value
+        assertThat(preview.sampleRows().get(0).texts().trade("tradeId")).isEqualTo("T-1");
         assertThat(preview.stats().dataRows()).isEqualTo(2);
         assertThat(preview.stats().mappedTradeColumns()).isEqualTo(3);
     }

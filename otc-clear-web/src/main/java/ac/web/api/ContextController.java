@@ -55,13 +55,15 @@ public class ContextController {
         exportDefaults.put("managedColumns", options.managedColumns().name());
         exportDefaults.put("formulaAsValue", options.formulaAsValue());
 
-        return new ContextView(properties.getMode().name(), tenantId, properties.getDataRoot(), version,
-                databaseInfo.info().display(), activeProfiles(),
+        return new ContextView(properties.getMode().name(), tenantId, properties.getUi().isShowTenant(),
+                properties.getDataRoot(), version, databaseInfo.info().display(), activeProfiles(),
                 properties.getAudit().isEnabled(),
                 new ContextView.LimitsView(properties.getLimits().getMaxFileSizeBytes(),
                         properties.getLimits().getMaxCloneCount(),
                         properties.getLimits().getMaxBulkDelete(),
                         properties.getLimits().getMaxRowsPerSheet()),
+                new ContextView.UiPreferences(settings.issueInlineLimit(tenantId),
+                        properties.getUi().getIssuePreviewRows()),
                 exportDefaults,
                 products.all(tenantId).stream().map(ProductView::of).toList());
     }

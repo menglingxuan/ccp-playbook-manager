@@ -11,12 +11,10 @@
       <div class="page-sub" id="taskSubtitle"></div>
     </div>
     <div class="row-actions">
-      <button class="tool-btn" id="backBtn">返回任务面板</button>
+      <button class="tool-btn" id="backBtn">返回任务管理</button>
       <button class="tool-btn danger" id="deleteTaskBtn">删除任务</button>
     </div>
   </div>
-
-  <section class="summary" id="taskSummary"></section>
 
   <section class="panel" style="margin-bottom:16px">
     <div class="panel-head"><h3>任务信息</h3></div>
@@ -29,8 +27,8 @@
       <table>
         <thead>
         <tr>
-          <th>批次</th><th>产品</th><th>Sheet</th><th>表头行</th><th>交易列</th>
-          <th class="num">行数</th><th class="num">无效</th><th>创建时间</th><th data-no-resize="true">操作</th>
+          <th>批次</th><th>批次名称</th><th>产品</th><th>Sheet</th><th>表头行</th><th>交易列</th>
+          <th class="num">行数</th><th class="num">无效</th><th>创建时间</th><th class="remark-col">备注</th><th data-no-resize="true">操作</th>
         </tr>
         </thead>
         <tbody id="batchRows"></tbody>

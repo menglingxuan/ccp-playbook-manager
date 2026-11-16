@@ -26,7 +26,7 @@ public class BaseProductRepository {
     public record BaseFieldRow(String id, String tenantId, String baseProductId, String fieldKey, String header,
             String displayName, List<String> aliases, String valueTypeCode, String roleCode, List<String> tags,
             boolean required, boolean businessKey, boolean keyFlag, int sortOrder, String remark,
-            String formatHint, String clonePattern) {
+            String formatHint, String clonePattern, String validationExpr) {
     }
 
     private static final String BASE_COLUMNS = """
@@ -37,7 +37,7 @@ public class BaseProductRepository {
     private static final String FIELD_COLUMNS = """
             id, tenant_id, base_product_id, field_key, header, display_name, aliases, value_type_code,
             role_code, tags, required_flag, business_key, key_flag, sort_order, remark, format_hint,
-            clone_pattern
+            clone_pattern, validation_expr
             """;
 
     public void insert(BaseProductRow row) {
@@ -118,10 +118,11 @@ public class BaseProductRepository {
         jdbc.sql("""
                         INSERT INTO base_product_field (id, tenant_id, base_product_id, field_key, header,
                             display_name, aliases, value_type_code, role_code, tags, required_flag, business_key,
-                            key_flag, sort_order, remark, format_hint, clone_pattern, created_at, updated_at)
+                            key_flag, sort_order, remark, format_hint, clone_pattern, validation_expr,
+                            created_at, updated_at)
                         VALUES (:id, :tenantId, :baseProductId, :fieldKey, :header, :displayName, :aliases,
                             :valueTypeCode, :roleCode, :tags, :required, :businessKey, :keyFlag, :sortOrder,
-                            :remark, :formatHint, :clonePattern, :now, :now)
+                            :remark, :formatHint, :clonePattern, :validationExpr, :now, :now)
                         """)
                 .param("id", row.id()).param("tenantId", row.tenantId())
                 .param("baseProductId", row.baseProductId()).param("fieldKey", row.fieldKey())
@@ -133,6 +134,7 @@ public class BaseProductRepository {
                 .param("sortOrder", row.sortOrder())
                 .param("remark", row.remark()).param("formatHint", row.formatHint())
                 .param("clonePattern", row.clonePattern())
+                .param("validationExpr", row.validationExpr())
                 .param("now", LocalDateTime.now(java.time.ZoneOffset.UTC)).update();
     }
 
@@ -143,7 +145,7 @@ public class BaseProductRepository {
                             role_code = :roleCode, tags = :tags, required_flag = :required,
                             business_key = :businessKey, key_flag = :keyFlag, sort_order = :sortOrder,
                             remark = :remark, format_hint = :formatHint, clone_pattern = :clonePattern,
-                            updated_at = :updatedAt
+                            validation_expr = :validationExpr, updated_at = :updatedAt
                         WHERE id = :id
                         """)
                 .param("fieldKey", row.fieldKey()).param("header", row.header())
@@ -153,7 +155,8 @@ public class BaseProductRepository {
                 .param("businessKey", row.businessKey()).param("keyFlag", row.keyFlag())
                 .param("sortOrder", row.sortOrder())
                 .param("remark", row.remark()).param("formatHint", row.formatHint())
-                .param("clonePattern", row.clonePattern()).param("updatedAt", updatedAt)
+                .param("clonePattern", row.clonePattern()).param("validationExpr", row.validationExpr())
+                .param("updatedAt", updatedAt)
                 .param("id", row.id()).update();
     }
 
@@ -215,6 +218,6 @@ public class BaseProductRepository {
                 rs.getString("value_type_code"), rs.getString("role_code"), TagCodec.decode(rs.getString("tags")),
                 rs.getBoolean("required_flag"), rs.getBoolean("business_key"), rs.getBoolean("key_flag"),
                 rs.getInt("sort_order"), rs.getString("remark"), rs.getString("format_hint"),
-                rs.getString("clone_pattern"));
+                rs.getString("clone_pattern"), rs.getString("validation_expr"));
     }
 }

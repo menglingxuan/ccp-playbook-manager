@@ -57,8 +57,9 @@ public class UploadStore {
         Path target = dataLayout.resolveInside(directory, uploadId + "." + sourceType.toLowerCase(Locale.ROOT));
 
         MessageDigest digest = sha256();
+        MessageDigest md5 = md5();
         long written = 0;
-        try (DigestInputStream input = new DigestInputStream(content, digest);
+        try (DigestInputStream input = new DigestInputStream(new DigestInputStream(content, md5), digest);
                 OutputStream output = Files.newOutputStream(target)) {
             byte[] buffer = new byte[64 * 1024];
             int read;
@@ -72,11 +73,15 @@ public class UploadStore {
                 output.write(buffer, 0, read);
             }
         } catch (IOException e) {
-            throw new ApiException(ac.core.common.ErrorCode.INTERNAL_ERROR, "Cannot store upload: " + e.getMessage());
+            // the message may carry an absolute path: log it, never return it to the client
+            log.warn("Cannot store upload {}", fileName, e);
+            throw new ApiException(ac.core.common.ErrorCode.INTERNAL_ERROR,
+                    "The file could not be stored, check the free space of the data directory");
         }
 
         StoredUpload upload = new StoredUpload(uploadId, fileName, sourceType,
-                HexFormat.of().formatHex(digest.digest()), written, target, time.nowUtc());
+                HexFormat.of().formatHex(digest.digest()), HexFormat.of().formatHex(md5.digest()), written,
+                target, time.nowUtc());
         writeMeta(directory, upload);
         return upload;
     }
@@ -115,6 +120,9 @@ public class UploadStore {
         properties.setProperty("fileName", upload.fileName());
         properties.setProperty("sourceType", upload.sourceType());
         properties.setProperty("sha256", upload.sha256());
+        if (upload.md5() != null && !upload.md5().isBlank()) {
+            properties.setProperty("md5", upload.md5());
+        }
         properties.setProperty("sizeBytes", Long.toString(upload.sizeBytes()));
         properties.setProperty("file", upload.path().getFileName().toString());
         properties.setProperty("createdAt", upload.createdAt().toString());
@@ -135,6 +143,7 @@ public class UploadStore {
                     props.getProperty("fileName", ""),
                     props.getProperty("sourceType", "CSV"),
                     props.getProperty("sha256", ""),
+                    props.getProperty("md5", ""),
                     Long.parseLong(props.getProperty("sizeBytes", "0")),
                     directory.resolve(props.getProperty("file", "")),
                     LocalDateTime.parse(props.getProperty("createdAt", time.nowUtc().toString()))));
@@ -193,10 +202,18 @@ public class UploadStore {
     }
 
     private static MessageDigest sha256() {
+        return digest("SHA-256");
+    }
+
+    private static MessageDigest md5() {
+        return digest("MD5");
+    }
+
+    private static MessageDigest digest(String algorithm) {
         try {
-            return MessageDigest.getInstance("SHA-256");
+            return MessageDigest.getInstance(algorithm);
         } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is not available", e);
+            throw new IllegalStateException(algorithm + " is not available", e);
         }
     }
 

@@ -63,7 +63,7 @@ class SampleDataTest extends AbstractIntegrationTest {
         assertThat(stats.get("managedColumns").asInt()).isEqualTo(2);
 
         JsonNode sample = sheetPreview.get("sampleRows").get(0);
-        assertThat(sample.get("values").get("tradeId").asString()).isEqualTo("IRS-W-0001");
+        assertThat(sample.get("rawTexts").get("data").get("tradeId").asString()).isEqualTo("IRS-W-0001");
         assertThat(sample.get("formulas").get("notional").asString()).isEqualTo("=1012500.00*1");
         assertThat(sample.get("managed").get("_Remarks").asString()).isNotEmpty();
         // columns outside the product definition never become managed columns
@@ -108,9 +108,9 @@ class SampleDataTest extends AbstractIntegrationTest {
         assertThat(sheetPreview.get("layout").get("missingFields")).isEmpty();
 
         JsonNode sample = sheetPreview.get("sampleRows").get(0);
-        assertThat(sample.get("values").get("reportTimestamp").asString())
+        assertThat(sample.get("rawTexts").get("data").get("reportTimestamp").asString())
                 .matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?");
-        assertThat(sample.get("values").get("tradeId").asString()).isEqualTo("IRS-1001");
+        assertThat(sample.get("rawTexts").get("data").get("tradeId").asString()).isEqualTo("IRS-1001");
         assertThat(sample.get("values").get("tradeDate").asString()).matches("\\d{4}-\\d{2}-\\d{2}");
         assertThat(sample.get("formulas").get("reportTimestamp").asString()).isEqualTo("=NOW()");
         assertThat(sample.get("formulas").get("tradeDate").asString()).isEqualTo("=TODAY()");
@@ -146,7 +146,7 @@ class SampleDataTest extends AbstractIntegrationTest {
         assertThat(stats.get("managedColumns").asInt()).isEqualTo(4);
 
         JsonNode sample = sheetPreview.get("sampleRows").get(0);
-        assertThat(sample.get("values").get("tradeId").asString()).isEqualTo("CCS-W-0001");
+        assertThat(sample.get("rawTexts").get("data").get("tradeId").asString()).isEqualTo("CCS-W-0001");
         // Scale is lost by the JSON node itself; the export path keeps it via BigDecimal (see ImportFlowTest).
         assertThat(sample.get("values").get("notional2").decimalValue()).isEqualByComparingTo("1620000.00");
 

@@ -1,5 +1,6 @@
 package ac.core.persistence;
 
+import ac.core.common.PageQuery;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -15,7 +16,8 @@ public class TestCaseRepository {
 
     private static final String COLUMNS = """
             id, tenant_id, batch_id, product_code, origin, row_no, source_row, test_case_id,
-            test_case_id_source, original_record_id, business_record_id, key_value, data_json, managed_json,
+            test_case_id_source, original_record_id, business_record_id, core_business_record_id, key_value,
+            data_json, managed_json, raw_json,
             formula_json, extras_json, formula_count, search_text, status, version, cloned_from,
             created_at, updated_at
             """;
@@ -29,13 +31,15 @@ public class TestCaseRepository {
     public void insert(TestCaseRecord row) {
         jdbc.sql("""
                         INSERT INTO test_case (id, tenant_id, batch_id, product_code, origin, row_no, source_row,
-                            test_case_id, test_case_id_source, original_record_id, business_record_id, key_value,
-                            data_json, managed_json, formula_json, extras_json, formula_count, search_text,
-                            status, version, cloned_from, created_at, updated_at)
+                            test_case_id, test_case_id_source, original_record_id, business_record_id,
+                            core_business_record_id, key_value,
+                            data_json, managed_json, raw_json, formula_json, extras_json, formula_count,
+                            search_text, status, version, cloned_from, created_at, updated_at)
                         VALUES (:id, :tenantId, :batchId, :productCode, :origin, :rowNo, :sourceRow,
-                            :testCaseId, :testCaseIdSource, :originalRecordId, :businessRecordId, :keyValue,
-                            :dataJson, :managedJson, :formulaJson, :extrasJson, :formulaCount, :searchText,
-                            :status, :version, :clonedFrom, :createdAt, :updatedAt)
+                            :testCaseId, :testCaseIdSource, :originalRecordId, :businessRecordId,
+                            :coreBusinessRecordId, :keyValue,
+                            :dataJson, :managedJson, :rawJson, :formulaJson, :extrasJson, :formulaCount,
+                            :searchText, :status, :version, :clonedFrom, :createdAt, :updatedAt)
                         """)
                 .param("id", row.id())
                 .param("tenantId", row.tenantId())
@@ -48,9 +52,11 @@ public class TestCaseRepository {
                 .param("testCaseIdSource", row.testCaseIdSource())
                 .param("originalRecordId", row.originalRecordId())
                 .param("businessRecordId", row.businessRecordId())
+                .param("coreBusinessRecordId", row.coreBusinessRecordId())
                 .param("keyValue", truncate(row.keyValue(), 200))
                 .param("dataJson", row.dataJson())
                 .param("managedJson", row.managedJson())
+                .param("rawJson", row.rawJson())
                 .param("formulaJson", row.formulaJson())
                 .param("extrasJson", row.extrasJson())
                 .param("formulaCount", row.formulaCount())
@@ -112,47 +118,168 @@ public class TestCaseRepository {
                 .param("tenantId", tenantId).param("batchId", batchId).query(this::map).list();
     }
 
-    public int updateCase(String tenantId, String id, int expectedVersion, String dataJson,
-            String managedJson, String formulaJson, int formulaCount, String searchText, String keyValue,
-            String businessRecordId, LocalDateTime updatedAt) {
-        return jdbc.sql("""
+    /**
+     * Rewrites one case row.
+     *
+     * @param expectedVersion optimistic lock version, {@code null} to overwrite unconditionally
+     * @return number of updated rows
+     */
+    public int updateCase(String tenantId, String id, Integer expectedVersion, String dataJson,
+            String managedJson, String rawJson, String formulaJson, int formulaCount, String searchText,
+            String keyValue, String businessRecordId, String coreBusinessRecordId, LocalDateTime updatedAt) {
+        boolean guarded = expectedVersion != null;
+        String sql = """
                         UPDATE test_case SET data_json = :dataJson, managed_json = :managedJson,
+                            raw_json = :rawJson,
                             formula_json = :formulaJson, formula_count = :formulaCount, search_text = :searchText,
                             key_value = :keyValue, business_record_id = :businessRecordId,
+                            core_business_record_id = :coreBusinessRecordId,
                             version = version + 1, updated_at = :updatedAt
-                        WHERE tenant_id = :tenantId AND id = :id AND version = :expectedVersion
-                        """)
+                        WHERE tenant_id = :tenantId AND id = :id
+                        """ + (guarded ? " AND version = :expectedVersion" : "");
+        var spec = jdbc.sql(sql)
                 .param("dataJson", dataJson)
                 .param("managedJson", managedJson)
+                .param("rawJson", rawJson)
                 .param("formulaJson", formulaJson)
                 .param("formulaCount", formulaCount)
                 .param("searchText", truncate(searchText, 4000))
                 .param("keyValue", truncate(keyValue, 200))
                 .param("businessRecordId", businessRecordId)
+                .param("coreBusinessRecordId", coreBusinessRecordId)
                 .param("updatedAt", updatedAt)
                 .param("tenantId", tenantId)
+                .param("id", id);
+        if (guarded) {
+            spec = spec.param("expectedVersion", expectedVersion);
+        }
+        return spec.update();
+    }
+
+    /**
+     * Active cases of one batch matching the optional filter, capped by {@code limit}.
+     *
+     * @param batchId    batch scope
+     * @param query      free text matched against the search text, may be {@code null}
+     * @param hasFormula only cases with formulas when true
+     * @param limit      maximum number of rows returned
+     */
+    public List<TestCaseRecord> listForBulkUpdate(String tenantId, String batchId, String query,
+            Boolean hasFormula, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM test_case c WHERE c.tenant_id = :tenantId");
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tenantId", tenantId);
+        appendFilters(sql, params, new CaseFilter(batchId, query, hasFormula, "row", null));
+        sql.append(" ORDER BY c.row_no LIMIT :limit");
+        params.put("limit", limit);
+        return jdbc.sql(sql.toString()).params(params).query(this::map).list();
+    }
+
+    /**
+     * Active cases of several batches matching the optional filter, used by the global case search.
+     *
+     * @param batchIds batch scope, empty for every batch of the tenant
+     * @param query    free text matched against the search text, may be {@code null}
+     * @param page     page request, {@code null} returns every matching row
+     */
+    public List<TestCaseRecord> pageInBatches(String tenantId, Collection<String> batchIds, String query,
+            PageQuery page) {
+        StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM test_case c WHERE c.tenant_id = :tenantId");
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tenantId", tenantId);
+        appendFilters(sql, params, new CaseFilter(null, query, null, "updated_desc", null));
+        if (batchIds != null && !batchIds.isEmpty()) {
+            sql.append(" AND c.batch_id IN (:batchIds)");
+            params.put("batchIds", batchIds);
+        }
+        sql.append(" ORDER BY c.updated_at DESC, c.row_no");
+        if (page != null) {
+            sql.append(" LIMIT :limit OFFSET :offset");
+            params.put("limit", page.size());
+            params.put("offset", page.offset());
+        }
+        return jdbc.sql(sql.toString()).params(params).query(this::map).list();
+    }
+
+    /**
+     * Rows imported before the core business record id existed, oldest first.
+     *
+     * @param limit maximum number of rows to return
+     */
+    public List<TestCaseRecord> listMissingCoreBusinessId(int limit) {
+        return jdbc.sql("SELECT " + COLUMNS + """
+                         FROM test_case WHERE core_business_record_id IS NULL
+                         ORDER BY created_at LIMIT :limit
+                        """)
+                .param("limit", limit).query(this::map).list();
+    }
+
+    /** Distinct tenants that own at least one case row. */
+    public List<String> listTenantIds() {
+        return jdbc.sql("SELECT DISTINCT tenant_id FROM test_case ORDER BY tenant_id")
+                .query(String.class).list();
+    }
+
+    /**
+     * One page of a tenant's cases ordered by id, used by the identity backfill.
+     *
+     * @param afterId last id of the previous page, empty for the first page
+     */
+    public List<TestCaseRecord> pageForIdentity(String tenantId, String afterId, int limit) {
+        return jdbc.sql("SELECT " + COLUMNS + """
+                         FROM test_case WHERE tenant_id = :tenantId AND id > :afterId
+                         ORDER BY id LIMIT :limit
+                        """)
+                .param("tenantId", tenantId)
+                .param("afterId", afterId == null ? "" : afterId)
+                .param("limit", limit)
+                .query(this::map).list();
+    }
+
+    /** Business record ids that appear more than once among the active cases of one batch. */
+    public List<String> duplicateBusinessRecordIds(String tenantId, String batchId) {
+        return duplicateRecordIds("business_record_id", tenantId, batchId);
+    }
+
+    /** Core business record ids that appear more than once among the active cases of one batch. */
+    public List<String> duplicateCoreBusinessRecordIds(String tenantId, String batchId) {
+        return duplicateRecordIds("core_business_record_id", tenantId, batchId);
+    }
+
+    private List<String> duplicateRecordIds(String column, String tenantId, String batchId) {
+        String sql = "SELECT " + column + " FROM test_case"
+                + " WHERE tenant_id = :tenantId AND batch_id = :batchId AND status = 'ACTIVE'"
+                + " AND " + column + " IS NOT NULL AND " + column + " <> ''"
+                + " GROUP BY " + column + " HAVING COUNT(*) > 1 ORDER BY " + column;
+        return jdbc.sql(sql)
+                .param("tenantId", tenantId)
+                .param("batchId", batchId)
+                .query(String.class).list();
+    }
+    /** Fills both business ids of one row without touching its version or timestamp. */
+    public int updateBusinessIds(String tenantId, String id, String businessRecordId, String coreBusinessRecordId) {
+        return jdbc.sql("""
+                        UPDATE test_case SET business_record_id = :businessRecordId,
+                            core_business_record_id = :coreBusinessRecordId
+                        WHERE tenant_id = :tenantId AND id = :id
+                        """)
+                .param("businessRecordId", businessRecordId)
+                .param("coreBusinessRecordId", coreBusinessRecordId)
+                .param("tenantId", tenantId)
                 .param("id", id)
-                .param("expectedVersion", expectedVersion)
                 .update();
     }
 
-    public int softDelete(String tenantId, String id, LocalDateTime updatedAt) {
-        return jdbc.sql("""
-                        UPDATE test_case SET status = 'DELETED', updated_at = :updatedAt
-                        WHERE tenant_id = :tenantId AND id = :id AND status = 'ACTIVE'
-                        """)
-                .param("updatedAt", updatedAt).param("tenantId", tenantId).param("id", id).update();
-    }
-
-    public int softDeleteMany(String tenantId, Collection<String> ids, LocalDateTime updatedAt) {
-        if (ids == null || ids.isEmpty()) {
-            return 0;
+    /** Number of rows {@link #pageInBatches} would return without the page window. */    public long countInBatches(String tenantId, Collection<String> batchIds, String query) {
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM test_case c WHERE c.tenant_id = :tenantId");
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tenantId", tenantId);
+        appendFilters(sql, params, new CaseFilter(null, query, null, "row", null));
+        if (batchIds != null && !batchIds.isEmpty()) {
+            sql.append(" AND c.batch_id IN (:batchIds)");
+            params.put("batchIds", batchIds);
         }
-        return jdbc.sql("""
-                        UPDATE test_case SET status = 'DELETED', updated_at = :updatedAt
-                        WHERE tenant_id = :tenantId AND id IN (:ids) AND status = 'ACTIVE'
-                        """)
-                .param("updatedAt", updatedAt).param("tenantId", tenantId).param("ids", ids).update();
+        return jdbc.sql(sql.toString()).params(params).query(Long.class).single();
     }
 
     public int softDeleteByBatch(String tenantId, String batchId, LocalDateTime updatedAt) {
@@ -163,13 +290,59 @@ public class TestCaseRepository {
                 .param("updatedAt", updatedAt).param("tenantId", tenantId).param("batchId", batchId).update();
     }
 
-    public int softDeleteByTask(String tenantId, String taskId, LocalDateTime updatedAt) {
-        return jdbc.sql("""
-                        UPDATE test_case SET status = 'DELETED', updated_at = :updatedAt
-                        WHERE tenant_id = :tenantId AND status = 'ACTIVE'
-                          AND batch_id IN (SELECT id FROM import_batch WHERE tenant_id = :tenantId AND task_id = :taskId)
-                        """)
-                .param("updatedAt", updatedAt).param("tenantId", tenantId).param("taskId", taskId).update();
+    /**
+     * Physically removes the cases of the given batches, together with the legacy dispatch links that
+     * point at them.
+     *
+     * <p>Used when a whole task is purged: the rows are gone afterwards, so nothing can reference them
+     * any more. Deleted cases are included, otherwise a previously soft deleted case would survive.
+     *
+     * @param tenantId tenant scope
+     * @param batchIds batches whose cases disappear
+     * @return number of removed cases
+     */
+    public int purgeByBatches(String tenantId, Collection<String> batchIds) {
+        if (batchIds == null || batchIds.isEmpty()) {
+            return 0;
+        }
+        deleteDispatchLinks(tenantId, "batch_id IN (:batchIds)", Map.of("batchIds", batchIds));
+        return jdbc.sql("DELETE FROM test_case WHERE tenant_id = :tenantId AND batch_id IN (:batchIds)")
+                .param("tenantId", tenantId).param("batchIds", batchIds).update();
+    }
+
+    /**
+     * Physically removes single cases and drops the references other cases hold on them.
+     *
+     * @param tenantId tenant scope
+     * @param caseIds  cases to remove
+     * @return number of removed cases
+     */
+    public int purgeByIds(String tenantId, Collection<String> caseIds) {
+        if (caseIds == null || caseIds.isEmpty()) {
+            return 0;
+        }
+        deleteDispatchLinks(tenantId, "id IN (:caseIds)", Map.of("caseIds", caseIds));
+        jdbc.sql("UPDATE test_case SET cloned_from = NULL WHERE tenant_id = :tenantId AND cloned_from IN (:caseIds)")
+                .param("tenantId", tenantId).param("caseIds", caseIds).update();
+        return jdbc.sql("DELETE FROM test_case WHERE tenant_id = :tenantId AND id IN (:caseIds)")
+                .param("tenantId", tenantId).param("caseIds", caseIds).update();
+    }
+
+    /**
+     * Removes the legacy {@code external_job_case} rows of the selected cases.
+     *
+     * <p>The table is a leftover of the removed dispatch module and has no other reader, but it holds
+     * case ids, so leaving rows behind would keep dead references in the database.
+     */
+    private void deleteDispatchLinks(String tenantId, String caseSelector, Map<String, ?> params) {
+        StringBuilder sql = new StringBuilder(
+                "DELETE FROM external_job_case WHERE tenant_id = :tenantId AND case_id IN (SELECT id FROM test_case WHERE tenant_id = :tenantId AND ")
+                .append(caseSelector).append(')');
+        var statement = jdbc.sql(sql.toString()).param("tenantId", tenantId);
+        for (Map.Entry<String, ?> entry : params.entrySet()) {
+            statement = statement.param(entry.getKey(), entry.getValue());
+        }
+        statement.update();
     }
 
     /** Existing key values of a product, used to detect duplicate keys before an import or clone. */
@@ -202,8 +375,12 @@ public class TestCaseRepository {
                 .param("tenantId", tenantId).param("origin", origin).query(Long.class).single();
     }
 
+    /** Active cases of one product; deleted rows no longer block a product delete. */
     public long countByProduct(String tenantId, String productCode) {
-        return jdbc.sql("SELECT COUNT(*) FROM test_case WHERE tenant_id = :tenantId AND product_code = :productCode")
+        return jdbc.sql("""
+                        SELECT COUNT(*) FROM test_case
+                        WHERE tenant_id = :tenantId AND product_code = :productCode AND status = 'ACTIVE'
+                        """)
                 .param("tenantId", tenantId).param("productCode", productCode).query(Long.class).single();
     }
 
@@ -264,9 +441,11 @@ public class TestCaseRepository {
                 rs.getString("test_case_id_source"),
                 rs.getString("original_record_id"),
                 rs.getString("business_record_id"),
+                rs.getString("core_business_record_id"),
                 rs.getString("key_value"),
                 rs.getString("data_json"),
                 rs.getString("managed_json"),
+                rs.getString("raw_json"),
                 rs.getString("formula_json"),
                 rs.getString("extras_json"),
                 rs.getInt("formula_count"),

@@ -6,6 +6,7 @@ import ac.domain.layout.ManagedKind;
 import ac.domain.product.FieldCodec;
 import ac.domain.product.FieldDef;
 import ac.domain.product.FieldFormatException;
+import ac.domain.product.FieldRole;
 import ac.domain.product.ProductSchema;
 import ac.domain.table.RawCell;
 import ac.domain.table.RawRow;
@@ -29,6 +30,8 @@ public final class RowConverter {
         RawRow raw = table.row(sourceRow - 1);
         Map<String, Object> data = new LinkedHashMap<>();
         Map<String, String> managed = new LinkedHashMap<>();
+        Map<String, String> rawData = new LinkedHashMap<>();
+        Map<String, String> rawManaged = new LinkedHashMap<>();
         Map<String, String> formulas = new LinkedHashMap<>();
         Map<String, String> extras = new LinkedHashMap<>();
         List<UnresolvedFormula> unresolved = new ArrayList<>();
@@ -37,32 +40,46 @@ public final class RowConverter {
         for (ColumnAssignment assignment : context.layout().assignments()) {
             String header = assignment.header();
             RawCell cell = raw.cell(assignment.column());
+            String cellText = cell.text() == null ? "" : cell.text();
             if (assignment.kind() == ColumnKind.TRADE) {
                 FieldDef field = schema.requireField(assignment.fieldKey());
                 collectFormula(context, cell, field.key(), assignment.column(), formulas, unresolved, issues);
-                Object value = parseCell(field, cell, assignment, issues);
-                if (value != null) {
+                if (!cellText.isEmpty()) {
+                    // the original text is what every business computation uses later
+                    rawData.put(field.key(), cellText);
+                }
+                Object value = parseCell(field, cell, assignment, sourceRow, issues);
+                // only date, time, date time, boolean and numeric values keep a normalized copy;
+                // text and enumerated values live in the original text only
+                if (value != null && field.type().normalized()) {
                     data.put(field.key(), value);
                 }
             } else if (assignment.kind() == ColumnKind.MANAGED) {
                 collectFormula(context, cell, assignment.managedKey(), assignment.column(), formulas,
                         unresolved, issues);
-                String text = cell.text().trim();
+                if (!cellText.isBlank()) {
+                    rawManaged.put(assignment.managedKey(), cellText);
+                }
+                String text = cellText.trim();
                 if (!text.isEmpty()) {
                     managed.put(assignment.managedKey(), text);
                 }
             } else if (assignment.kind() == ColumnKind.UNMAPPED) {
-                String text = cell.text().trim();
+                String text = cellText.trim();
                 if (!text.isEmpty()) {
                     extras.put(extrasKey(header, assignment.column()), text);
                 }
             }
         }
 
-        boolean empty = data.isEmpty() && managed.isEmpty() && extras.isEmpty() && formulas.isEmpty();
+        CellTexts rawTexts = new CellTexts(rawData, rawManaged);
+        CellTexts texts = CellTexts.of(data, managed, rawTexts);
+        boolean empty = texts.data().isEmpty() && texts.managed().isEmpty() && extras.isEmpty()
+                && formulas.isEmpty();
 
         for (FieldDef required : schema.requiredFields()) {
-            if (data.get(required.key()) == null) {
+            String text = texts.trade(required.key());
+            if (text == null || text.isBlank()) {
                 issues.add(ValidationIssue.error("MISSING_REQUIRED_FIELD",
                                 "Required field '" + required.header() + "' is empty")
                         .atRow(sourceRow)
@@ -74,11 +91,18 @@ public final class RowConverter {
                 sourceRow, context.hashLength());
         Map<String, String> hashFormulas = context.normalizeFormulaRefs()
                 ? Formulas.normalized(formulas) : formulas;
-        String businessRecordId = RecordIdGenerator.businessId(schema, data, hashFormulas, context.hashLength());
-        if (businessRecordId.isEmpty() || !hasBusinessValue(schema, data, formulas)) {
+        String businessRecordId = RecordIdGenerator.businessId(schema, texts, hashFormulas,
+                context.hashLength());
+        if (businessRecordId.isEmpty() || !hasBusinessValue(schema, texts, formulas)) {
             issues.add(ValidationIssue.warn("BUSINESS_KEY_EMPTY",
                     "Business fields are empty, falling back to the original record id").atRow(sourceRow));
             businessRecordId = originalRecordId;
+        }
+        // core id ignores managed columns, so a remarks-only row has nothing to hash either
+        String coreBusinessRecordId = RecordIdGenerator.coreBusinessId(schema, texts, hashFormulas,
+                context.hashLength());
+        if (coreBusinessRecordId.isEmpty()) {
+            coreBusinessRecordId = originalRecordId;
         }
 
         String testCaseId = managed.get(testCaseIdKey(context.layout()));
@@ -90,12 +114,13 @@ public final class RowConverter {
 
         String keyValue = null;
         if (schema.uniqueField() != null) {
-            Object key = data.get(schema.uniqueField().key());
-            keyValue = key == null ? null : FieldCodec.toCanonical(key);
+            String keyText = texts.trade(schema.uniqueField().key());
+            keyValue = keyText == null || keyText.isBlank()
+                    ? null : FieldCodec.canonical(schema.uniqueField(), keyText);
         }
 
-        return new CaseRow(sourceRow, rowNo, data, managed, formulas, unresolved, extras, testCaseId,
-                idSource, originalRecordId, businessRecordId, keyValue, issues, empty);
+        return new CaseRow(sourceRow, rowNo, data, managed, rawTexts, formulas, unresolved, extras, testCaseId,
+                idSource, originalRecordId, businessRecordId, coreBusinessRecordId, keyValue, issues, empty);
     }
 
     private static void collectFormula(ConversionContext context, RawCell cell, String key, int column,
@@ -116,10 +141,11 @@ public final class RowConverter {
     }
 
     private static Object parseCell(FieldDef field, RawCell cell, ColumnAssignment assignment,
-            List<ValidationIssue> issues) {
+            int sourceRow, List<ValidationIssue> issues) {
         if (cell.hasFormulaError()) {
             issues.add(ValidationIssue.warn("FORMULA_ERROR",
                             "Formula error '" + cell.text() + "' in column " + assignment.columnNumber())
+                    .atRow(sourceRow)
                     .atColumn(assignment.columnNumber(), assignment.header())
                     .forField(field.key()));
             return null;
@@ -128,6 +154,7 @@ public final class RowConverter {
             return FieldCodec.parse(field, cell.text());
         } catch (FieldFormatException e) {
             issues.add(ValidationIssue.error("TYPE_MISMATCH", e.getMessage())
+                    .atRow(sourceRow)
                     .atColumn(assignment.columnNumber(), assignment.header())
                     .forField(field.key()));
             return null;
@@ -149,14 +176,18 @@ public final class RowConverter {
                 .orElse(ac.domain.layout.ManagedColumnClassifier.DEFAULT_TESTCASE_ID_KEY);
     }
 
-    private static boolean hasBusinessValue(ProductSchema schema, Map<String, Object> data,
+    private static boolean hasBusinessValue(ProductSchema schema, CellTexts texts,
             Map<String, String> formulas) {
-        for (FieldDef field : schema.businessFields()) {
+        Map<String, String> managedKeys = ac.domain.layout.ManagedColumnClassifier.storageKeys(
+                schema.fields());
+        for (FieldDef field : schema.fields()) {
             if (formulas.containsKey(field.key())) {
                 return true;
             }
-            Object value = data.get(field.key());
-            if (value != null && !String.valueOf(value).isBlank()) {
+            String value = field.role() == FieldRole.MANAGED
+                    ? texts.managedValue(managedKeys.getOrDefault(field.key(), field.key()))
+                    : texts.trade(field.key());
+            if (value != null && !value.isBlank()) {
                 return true;
             }
         }

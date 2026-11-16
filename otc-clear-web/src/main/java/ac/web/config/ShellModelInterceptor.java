@@ -28,6 +28,7 @@ public class ShellModelInterceptor implements HandlerInterceptor {
             ModelAndView modelAndView) {
         if (modelAndView != null) {
             modelAndView.addObject("auditEnabled", properties.getAudit().isEnabled());
+            modelAndView.addObject("showTenant", properties.getUi().isShowTenant());
         }
     }
 }

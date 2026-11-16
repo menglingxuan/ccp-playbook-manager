@@ -10,7 +10,7 @@
   <div class="filters" id="taskChips"></div>
 
   <div class="toolbar">
-    <input type="search" id="taskSearch" placeholder="搜索 任务 ID / 任务名称 / 文件名 / 基产品">
+    <input type="search" id="taskSearch" placeholder="搜索 任务 ID / 任务名称 / 文件名 / 基产品" aria-label="搜索 任务 ID / 任务名称 / 文件名 / 基产品">
     <select id="taskProduct"></select>
     <label class="toolbar-date">创建日期
       <input type="date" id="taskFrom" aria-label="创建日期起">
@@ -33,6 +33,7 @@
           <th class="num th-sort" data-sort="batches" tabindex="0" title="按批次数排序：升序 / 降序 / 原始顺序">批次数<span class="sort-arrow"></span></th>
           <th>基产品</th>
           <th class="th-sort" data-sort="created" tabindex="0" title="按创建时间排序：升序 / 降序 / 原始顺序（默认倒序）">创建时间<span class="sort-arrow"></span></th>
+          <th class="remark-col">备注</th>
           <th data-no-resize="true">操作</th>
         </tr>
         </thead>
@@ -44,7 +45,7 @@
     </div>
   </section>
 
-  <p class="footer-note">数据目录由启动参数决定；删除任务会级联软删批次与用例。</p>
+  <p class="footer-note">数据目录由启动参数决定；删除任务会彻底删除其批次、用例与导出记录（不可恢复）。</p>
 </main>
 
 <div th:replace="~{fragments/layout :: toast}"></div>

@@ -25,8 +25,9 @@ public class ImportTaskRepository {
                     WHERE b.task_id = t.id AND p.base_product_code = :product)""";
 
     private static final String COLUMNS = """
-            id, tenant_id, kind, status, name, source_name, source_sha256, sheet_count, batch_count,
-            total_rows, invalid_rows, params_json, issues_json, message, created_by, created_at, started_at, finished_at
+            id, tenant_id, kind, status, name, source_name, source_sha256, source_md5, sheet_count, batch_count,
+            total_rows, invalid_rows, params_json, issues_json, message, note, created_by, created_at, started_at,
+            finished_at
             """;
 
     private final JdbcClient jdbc;
@@ -38,11 +39,11 @@ public class ImportTaskRepository {
     public void insert(ImportTaskRow row) {
         jdbc.sql("""
                         INSERT INTO import_task (id, tenant_id, kind, status, name, source_name, source_sha256,
-                            sheet_count, batch_count, total_rows, invalid_rows, params_json, issues_json, message,
-                            created_by, created_at, started_at, finished_at)
-                        VALUES (:id, :tenantId, :kind, :status, :name, :sourceName, :sourceSha256,
+                            source_md5, sheet_count, batch_count, total_rows, invalid_rows, params_json, issues_json,
+                            message, note, created_by, created_at, started_at, finished_at)
+                        VALUES (:id, :tenantId, :kind, :status, :name, :sourceName, :sourceSha256, :sourceMd5,
                             :sheetCount, :batchCount, :totalRows, :invalidRows, :paramsJson, :issuesJson, :message,
-                            :createdBy, :createdAt, :startedAt, :finishedAt)
+                            :note, :createdBy, :createdAt, :startedAt, :finishedAt)
                         """)
                 .param("id", row.id())
                 .param("tenantId", row.tenantId())
@@ -51,13 +52,14 @@ public class ImportTaskRepository {
                 .param("name", row.name())
                 .param("sourceName", row.sourceName())
                 .param("sourceSha256", row.sourceSha256())
+                .param("sourceMd5", row.sourceMd5())
                 .param("sheetCount", row.sheetCount())
                 .param("batchCount", row.batchCount())
                 .param("totalRows", row.totalRows())
                 .param("invalidRows", row.invalidRows())
                 .param("paramsJson", row.paramsJson())
                 .param("issuesJson", row.issuesJson())
-                .param("message", row.message())
+                .param("message", row.message()).param("note", row.note())
                 .param("createdBy", row.createdBy())
                 .param("createdAt", row.createdAt())
                 .param("startedAt", row.startedAt())
@@ -125,9 +127,39 @@ public class ImportTaskRepository {
         return result;
     }
 
+    /** Replaces the free text remark of one task; {@code null} clears it. */
+    public void updateNote(String tenantId, String id, String note) {
+        jdbc.sql("UPDATE import_task SET note = :note WHERE tenant_id = :tenantId AND id = :id")
+                .param("tenantId", tenantId).param("id", id).param("note", note).update();
+    }
+
     public void markRunning(String tenantId, String id, LocalDateTime startedAt) {
         jdbc.sql("UPDATE import_task SET status = 'RUNNING', started_at = :startedAt WHERE tenant_id = :tenantId AND id = :id")
                 .param("tenantId", tenantId).param("id", id).param("startedAt", startedAt).update();
+    }
+
+    /**
+     * Writes the reconciled status of a task an import appended to.
+     *
+     * <p>{@link #finish} cannot be used for that case because the counters are grown separately; only the
+     * status, the finish time and (when given) the message are written here. A {@code null} message keeps
+     * the previously recorded one.
+     *
+     * @param tenantId   tenant scope
+     * @param id         task identifier
+     * @param status     reconciled status
+     * @param message    failure summary, {@code null} to keep the stored one
+     * @param finishedAt finish time of the append
+     */
+    public void reconcileStatus(String tenantId, String id, String status, String message,
+            LocalDateTime finishedAt) {
+        jdbc.sql("""
+                        UPDATE import_task SET status = :status, message = COALESCE(:message, message),
+                            finished_at = :finishedAt
+                        WHERE tenant_id = :tenantId AND id = :id
+                        """)
+                .param("tenantId", tenantId).param("id", id).param("status", status)
+                .param("message", message).param("finishedAt", finishedAt).update();
     }
 
     public void finish(String tenantId, String id, String status, int sheetCount, int batchCount,
@@ -146,8 +178,18 @@ public class ImportTaskRepository {
                 .update();
     }
 
-    public void softDelete(String tenantId, String id) {
-        jdbc.sql("UPDATE import_task SET status = 'DELETED' WHERE tenant_id = :tenantId AND id = :id")
+    /**
+     * Physically removes one task row.
+     *
+     * <p>Its batches and cases are deleted before by their own repositories; this is the last step of a
+     * purge, after which nothing in the database points at the task any more.
+     *
+     * @param tenantId tenant scope
+     * @param id       task identifier
+     * @return number of removed rows
+     */
+    public int purge(String tenantId, String id) {
+        return jdbc.sql("DELETE FROM import_task WHERE tenant_id = :tenantId AND id = :id")
                 .param("tenantId", tenantId).param("id", id).update();
     }
 
@@ -157,33 +199,53 @@ public class ImportTaskRepository {
                 .query(this::map).optional();
     }
 
+    /** Tasks by id, one query for a whole page of search results. */
+    public List<ImportTaskRow> listByIds(String tenantId, List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("SELECT " + COLUMNS + " FROM import_task"
+                        + " WHERE tenant_id = :tenantId AND id IN (:ids)")
+                .param("tenantId", tenantId).param("ids", ids)
+                .query(this::map).list();
+    }
+
+    /**
+     * Task of the tenant with exactly this name, ignoring case.
+     *
+     * <p>Deleted tasks are returned as well, so callers can tell a free name from one that is only
+     * occupied by a deleted task.
+     */
+    public Optional<ImportTaskRow> findByName(String tenantId, String name) {
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
+        }
+        return jdbc.sql("SELECT " + COLUMNS + " FROM import_task"
+                        + " WHERE tenant_id = :tenantId AND LOWER(name) = LOWER(:name)")
+                .param("tenantId", tenantId).param("name", name.trim())
+                .query(this::map).stream().findFirst();
+    }
+
+    /** Adds the counters of one import run to an existing task, used when batches are joined. */
+    public void addCounts(String tenantId, String id, int sheetDelta, int batchDelta, int rowDelta,
+            int invalidDelta) {
+        jdbc.sql("""
+                        UPDATE import_task SET sheet_count = sheet_count + :sheets,
+                            batch_count = batch_count + :batches,
+                            total_rows = total_rows + :rows,
+                            invalid_rows = invalid_rows + :invalid
+                        WHERE tenant_id = :tenantId AND id = :id
+                        """)
+                .param("tenantId", tenantId).param("id", id)
+                .param("sheets", sheetDelta).param("batches", batchDelta)
+                .param("rows", rowDelta).param("invalid", invalidDelta)
+                .update();
+    }
+
     public List<ImportTaskRow> search(String tenantId, TaskFilter filter) {
-        StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM import_task t WHERE t.tenant_id = :tenantId");
+        StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM import_task t");
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("tenantId", tenantId);
-        if (filter.kind() != null && !filter.kind().isBlank()) {
-            sql.append(" AND t.kind = :kind");
-            params.put("kind", filter.kind());
-        }
-        if (filter.status() != null && !filter.status().isBlank()) {
-            sql.append(" AND t.status = :status");
-            params.put("status", filter.status());
-        } else {
-            sql.append(" AND t.status <> 'DELETED'");
-        }
-        if (filter.product() != null && !filter.product().isBlank()) {
-            sql.append(" AND " + BASE_PRODUCT_EXISTS);
-            params.put("product", filter.product().toUpperCase(java.util.Locale.ROOT));
-        }
-        if (filter.query() != null && !filter.query().isBlank()) {
-            sql.append(" AND (LOWER(t.source_name) LIKE :query OR LOWER(t.id) LIKE :query")
-                    .append(" OR LOWER(t.name) LIKE :query")
-                    .append(" OR EXISTS (SELECT 1 FROM import_batch b")
-                    .append(" JOIN product p ON p.tenant_id = b.tenant_id AND p.code = b.product_code")
-                    .append(" WHERE b.task_id = t.id AND LOWER(p.base_product_code) LIKE :query))");
-            params.put("query", "%" + filter.query().trim().toLowerCase(java.util.Locale.ROOT) + "%");
-        }
-        appendDateRange(sql, params, filter);
+        appendFilter(sql, params, tenantId, filter, true);
         sql.append(orderBy(filter.sort()));
         sql.append(" LIMIT :limit OFFSET :offset");
         params.put("limit", filter.page().size());
@@ -192,50 +254,81 @@ public class ImportTaskRepository {
     }
 
     public long count(String tenantId, TaskFilter filter) {
-        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM import_task t WHERE t.tenant_id = :tenantId");
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM import_task t");
         Map<String, Object> params = new LinkedHashMap<>();
+        appendFilter(sql, params, tenantId, filter, true);
+        return jdbc.sql(sql.toString()).params(params).query(Long.class).single();
+    }
+
+    /**
+     * Status counts of the tasks matching the filter, without its status clause.
+     *
+     * <p>Counting the same predicate the list uses keeps every card reproducible: clicking it yields
+     * exactly the number shown, also while a search, product or date filter is active.
+     *
+     * @param tenantId tenant scope
+     * @param filter   filter whose status is ignored; {@code null} counts everything
+     * @return one row per status with an {@code status} / {@code total} pair
+     */
+    public List<Map<String, Object>> statusCounts(String tenantId, TaskFilter filter) {
+        StringBuilder sql = new StringBuilder("SELECT t.status, COUNT(*) AS total FROM import_task t");
+        Map<String, Object> params = new LinkedHashMap<>();
+        appendFilter(sql, params, tenantId, filter, false);
+        sql.append(" GROUP BY t.status");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        jdbc.sql(sql.toString()).params(params).query((rs, rowNum) -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("status", rs.getString("status"));
+            item.put("total", rs.getInt("total"));
+            rows.add(item);
+            return item;
+        }).list();
+        return rows;
+    }
+
+    /**
+     * Shared predicate of the list, its count and the status summary.
+     *
+     * @param sql        statement being built, must already select from {@code import_task t}
+     * @param params     named parameters collected so far
+     * @param tenantId   tenant scope
+     * @param filter     filter values, {@code null} for none
+     * @param withStatus whether the status clause of the filter applies; the summary drops it so it
+     *                   can group by status
+     */
+    private static void appendFilter(StringBuilder sql, Map<String, Object> params, String tenantId,
+            TaskFilter filter, boolean withStatus) {
+        sql.append(" WHERE t.tenant_id = :tenantId");
         params.put("tenantId", tenantId);
-        if (filter.kind() != null && !filter.kind().isBlank()) {
+        String kind = filter == null ? null : filter.kind();
+        String status = filter == null ? null : filter.status();
+        String product = filter == null ? null : filter.product();
+        String query = filter == null ? null : filter.query();
+        if (kind != null && !kind.isBlank()) {
             sql.append(" AND t.kind = :kind");
-            params.put("kind", filter.kind());
+            params.put("kind", kind);
         }
-        if (filter.status() != null && !filter.status().isBlank()) {
+        if (withStatus && status != null && !status.isBlank()) {
             sql.append(" AND t.status = :status");
-            params.put("status", filter.status());
+            params.put("status", status);
         } else {
             sql.append(" AND t.status <> 'DELETED'");
         }
-        if (filter.product() != null && !filter.product().isBlank()) {
+        if (product != null && !product.isBlank()) {
             sql.append(" AND " + BASE_PRODUCT_EXISTS);
-            params.put("product", filter.product().toUpperCase(java.util.Locale.ROOT));
+            params.put("product", product.toUpperCase(java.util.Locale.ROOT));
         }
-        if (filter.query() != null && !filter.query().isBlank()) {
+        if (query != null && !query.isBlank()) {
             sql.append(" AND (LOWER(t.source_name) LIKE :query OR LOWER(t.id) LIKE :query")
                     .append(" OR LOWER(t.name) LIKE :query")
                     .append(" OR EXISTS (SELECT 1 FROM import_batch b")
                     .append(" JOIN product p ON p.tenant_id = b.tenant_id AND p.code = b.product_code")
                     .append(" WHERE b.task_id = t.id AND LOWER(p.base_product_code) LIKE :query))");
-            params.put("query", "%" + filter.query().trim().toLowerCase(java.util.Locale.ROOT) + "%");
+            params.put("query", "%" + query.trim().toLowerCase(java.util.Locale.ROOT) + "%");
         }
-        appendDateRange(sql, params, filter);
-        return jdbc.sql(sql.toString()).params(params).query(Long.class).single();
-    }
-
-    public List<Map<String, Object>> statusCounts(String tenantId) {
-        List<Map<String, Object>> rows = new ArrayList<>();
-        jdbc.sql("""
-                        SELECT status, COUNT(*) AS total FROM import_task
-                        WHERE tenant_id = :tenantId AND status <> 'DELETED' GROUP BY status
-                        """)
-                .param("tenantId", tenantId)
-                .query((rs, rowNum) -> {
-                    Map<String, Object> item = new LinkedHashMap<>();
-                    item.put("status", rs.getString("status"));
-                    item.put("total", rs.getInt("total"));
-                    rows.add(item);
-                    return item;
-                }).list();
-        return rows;
+        if (filter != null) {
+            appendDateRange(sql, params, filter);
+        }
     }
 
     /**
@@ -290,6 +383,7 @@ public class ImportTaskRepository {
                 rs.getString("name"),
                 rs.getString("source_name"),
                 rs.getString("source_sha256"),
+                rs.getString("source_md5"),
                 rs.getInt("sheet_count"),
                 rs.getInt("batch_count"),
                 rs.getInt("total_rows"),
@@ -297,6 +391,7 @@ public class ImportTaskRepository {
                 rs.getString("params_json"),
                 rs.getString("issues_json"),
                 rs.getString("message"),
+                rs.getString("note"),
                 rs.getString("created_by"),
                 rs.getObject("created_at", LocalDateTime.class),
                 rs.getObject("started_at", LocalDateTime.class),

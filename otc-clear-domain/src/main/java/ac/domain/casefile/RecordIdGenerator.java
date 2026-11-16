@@ -1,9 +1,11 @@
 package ac.domain.casefile;
 
 import ac.domain.ids.Hashing;
-import ac.domain.product.FieldCodec;
+import ac.domain.layout.ManagedColumnClassifier;
 import ac.domain.product.FieldDef;
+import ac.domain.product.FieldRole;
 import ac.domain.product.ProductSchema;
+import java.util.List;
 import java.util.Map;
 
 /** Deterministic generation of the three record identifiers. */
@@ -22,18 +24,42 @@ public final class RecordIdGenerator {
     }
 
     /**
-     * Business record id: hashes the configured business fields. A formula cell contributes its
-     * formula text so that recalculated values do not change the identity.
+     * Business record id: hashes every field the product declares, managed columns included, so the
+     * id follows edits of {@code _Remarks} or {@code _TestCaseId} as well. Values enter the hash as
+     * the original cell text (or the text the user typed), never as a type-normalized rendering; a
+     * formula cell contributes its formula text so that recalculated values do not change the
+     * identity.
+     *
+     * @param texts    original texts of the row
+     * @param formulas field or managed key to formula text
      */
-    public static String businessId(ProductSchema schema, Map<String, Object> data,
+    public static String businessId(ProductSchema schema, CellTexts texts,
             Map<String, String> formulas, int hashLength) {
+        return idOf(schema.fields(), texts, formulas, hashLength);
+    }
+
+    /**
+     * Core business record id: same recipe as {@link #businessId}, but only the business (trade)
+     * fields take part, so managed columns such as {@code _TestCaseId} or {@code _Remarks} never
+     * change it.
+     */
+    public static String coreBusinessId(ProductSchema schema, CellTexts texts,
+            Map<String, String> formulas, int hashLength) {
+        return idOf(schema.tradeFields(), texts, formulas, hashLength);
+    }
+
+    private static String idOf(List<FieldDef> fields, CellTexts texts, Map<String, String> formulas,
+            int hashLength) {
+        Map<String, String> managedKeys = ManagedColumnClassifier.storageKeys(fields);
         StringBuilder sb = new StringBuilder();
-        for (FieldDef field : schema.businessFields()) {
+        for (FieldDef field : fields) {
             String value;
-            if (formulas.containsKey(field.key())) {
+            if (formulas != null && formulas.containsKey(field.key())) {
                 value = formulas.get(field.key());
+            } else if (field.role() == FieldRole.MANAGED) {
+                value = texts.managedValue(managedKeys.getOrDefault(field.key(), field.key()));
             } else {
-                value = FieldCodec.canonical(field, data.get(field.key()));
+                value = texts.trade(field.key());
             }
             sb.append(field.key()).append('=').append(value == null ? "" : value).append(UNIT_SEPARATOR);
         }

@@ -15,6 +15,7 @@ app:
     max-sheets: 50
     max-clone-count: 200
     max-bulk-delete: 500
+    max-bulk-field-update: 5000
     upload-ttl-minutes: 60
     preview-row-limit: 300
     preview-sample-rows: 20
@@ -36,6 +37,15 @@ app:
     # the prod profile disables the entry; dev keeps the trail on
     enabled: true
     page-size: 25
+
+  ui:
+    # show the tenant identifier in the top bar and on the about page; off by default because a
+    # deployment normally serves a single tenant
+    show-tenant: false
+    # issue lists preview five entries; up to this many they expand in place, beyond it a paginated
+    # drawer is opened instead. Can be overridden per tenant through /api/settings/ui.
+    issue-inline-limit: 10
+    issue-preview-rows: 5
 
 spring:
   application:

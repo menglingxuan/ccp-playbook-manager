@@ -123,4 +123,27 @@ public class BaselineStore {
         }
         return HexFormat.of().formatHex(digest.digest());
     }
+
+    /**
+     * Deletes the baseline folder of a batch.
+     *
+     * <p>Called when a batch is deleted for good: the workbook is only needed while the batch can be
+     * exported, and without this the disk keeps growing with files nothing references any more.
+     */
+    public void delete(String tenantId, String batchId) {
+        if (batchId == null || batchId.isBlank()) {
+            return;
+        }
+        Path folder = dataLayout.existingBatchFolder(tenantId, batchId);
+        if (folder == null) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> files = Files.walk(folder)) {
+            for (Path path : (Iterable<Path>) files.sorted(java.util.Comparator.reverseOrder())::iterator) {
+                Files.deleteIfExists(path);
+            }
+        } catch (IOException e) {
+            log.warn("Cannot delete the baseline folder of batch {}: {}", batchId, e.getMessage());
+        }
+    }
 }

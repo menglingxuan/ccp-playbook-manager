@@ -162,6 +162,11 @@ class ProductDefinitionTest extends AbstractIntegrationTest {
         var blocked = api.delete("/api/catalog/products/" + productId);
         assertThat(blocked.status()).isEqualTo(409);
         assertThat(blocked.json().get("code").asString()).isEqualTo("CONFLICT");
+
+        // a soft-deleted batch no longer counts as a reference, so the product becomes removable
+        String taskId = importResponse.json().get("taskId").asString();
+        assertThat(api.delete("/api/tasks/" + taskId).ok()).isTrue();
+        assertThat(api.delete("/api/catalog/products/" + productId).ok()).isTrue();
     }
 
     @Test

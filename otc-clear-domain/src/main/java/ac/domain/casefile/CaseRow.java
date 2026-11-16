@@ -10,6 +10,7 @@ import java.util.Map;
  * @param rowNo              1-based position inside the batch
  * @param data               product field key to typed value
  * @param managed            managed key to text value
+ * @param rawTexts           original cell texts exactly as read from the sheet
  * @param formulas           field or managed key to formula text
  * @param unresolvedFormulas formula cells without capturable text
  * @param extras             unmapped column header to text value
@@ -17,6 +18,7 @@ import java.util.Map;
  * @param testCaseIdSource   origin of {@code testCaseId}
  * @param originalRecordId   deterministic id built from file, sheet and row
  * @param businessRecordId   deterministic id built from business fields
+ * @param coreBusinessRecordId deterministic id built from the business (trade) fields only
  * @param keyValue           canonical value of the product unique field
  * @param issues             problems found while converting
  * @param empty              true when the row carries no data at all
@@ -26,6 +28,7 @@ public record CaseRow(
         int rowNo,
         Map<String, Object> data,
         Map<String, String> managed,
+        CellTexts rawTexts,
         Map<String, String> formulas,
         List<UnresolvedFormula> unresolvedFormulas,
         Map<String, String> extras,
@@ -33,6 +36,7 @@ public record CaseRow(
         TestCaseIdSource testCaseIdSource,
         String originalRecordId,
         String businessRecordId,
+        String coreBusinessRecordId,
         String keyValue,
         List<ValidationIssue> issues,
         boolean empty) {
@@ -40,10 +44,23 @@ public record CaseRow(
     public CaseRow {
         data = Map.copyOf(data);
         managed = Map.copyOf(managed);
+        rawTexts = rawTexts == null ? CellTexts.EMPTY : rawTexts;
         formulas = Map.copyOf(formulas);
         unresolvedFormulas = List.copyOf(unresolvedFormulas);
         extras = Map.copyOf(extras);
         issues = List.copyOf(issues);
+    }
+
+    /** Same row with a replaced issue list, used to attach rule warnings. */
+    public CaseRow withIssues(List<ValidationIssue> replacement) {
+        return new CaseRow(sourceRow, rowNo, data, managed, rawTexts, formulas, unresolvedFormulas, extras,
+                testCaseId, testCaseIdSource, originalRecordId, businessRecordId, coreBusinessRecordId,
+                keyValue, replacement, empty);
+    }
+
+    /** Texts used by every business computation of this row. */
+    public CellTexts texts() {
+        return CellTexts.of(data, managed, rawTexts);
     }
 
     public boolean valid() {
@@ -54,14 +71,19 @@ public record CaseRow(
         return !formulas.isEmpty();
     }
 
-    /** Text used by the free text search column. */
+    /** Text used by the free text search column: the original cell texts, never normalized values. */
     public String searchText() {
+        return searchText(texts(), extras);
+    }
+
+    /** Same text built from the texts and unmapped columns actually kept for storage. */
+    public String searchText(CellTexts storedTexts, Map<String, String> storedExtras) {
         StringBuilder sb = new StringBuilder();
         appendIfPresent(sb, testCaseId);
         appendIfPresent(sb, keyValue);
-        data.values().forEach(value -> appendIfPresent(sb, value == null ? null : String.valueOf(value)));
-        managed.values().forEach(value -> appendIfPresent(sb, value));
-        extras.values().forEach(value -> appendIfPresent(sb, value));
+        storedTexts.data().values().forEach(value -> appendIfPresent(sb, value));
+        storedTexts.managed().values().forEach(value -> appendIfPresent(sb, value));
+        storedExtras.values().forEach(value -> appendIfPresent(sb, value));
         return sb.toString();
     }
 

@@ -2,7 +2,11 @@ package ac.core.persistence;
 
 import java.time.LocalDateTime;
 
-/** Persisted export job row. */
+/**
+ * Persisted export job row.
+ *
+ * @param note free text remark shown on the export list, may be {@code null}
+ */
 public record ExportJobRow(
         String id,
         String tenantId,
@@ -16,6 +20,7 @@ public record ExportJobRow(
         String optionsJson,
         String status,
         String message,
+        String note,
         String createdBy,
         LocalDateTime createdAt) {
 }

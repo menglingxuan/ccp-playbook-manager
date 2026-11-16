@@ -18,6 +18,7 @@ import ac.domain.clone.NamingTemplate;
 import ac.domain.product.FieldCodec;
 import ac.domain.product.FieldDef;
 import ac.domain.product.ProductSchema;
+import ac.domain.casefile.CellTexts;
 import ac.domain.casefile.Formulas;
 import ac.domain.casefile.RecordIdGenerator;
 import java.time.LocalDate;
@@ -94,7 +95,8 @@ public class CloneService {
         String taskId = batchRepository.find(tenantId, plan.parentBatchId())
                 .map(ImportBatchRow::taskId)
                 .orElse(null);
-        ImportBatchRow batch = new ImportBatchRow(batchId, tenantId, taskId, null, "CLONE", plan.parentBatchId(),
+        ImportBatchRow batch = new ImportBatchRow(batchId, tenantId, taskId,
+                batchRepository.nextDefaultName(tenantId, taskId), null, "CLONE", plan.parentBatchId(),
                 plan.schema().code(), "clone-" + plan.schema().code(), null, "CLONE", null, 0, 0, 0, null, null,
                 plan.schema().schemaHash(), "ACTIVE", plan.rows().size(), 0, request.note(), false, false, null,
                 "system", now, now, null);
@@ -108,9 +110,10 @@ public class CloneService {
             TestCaseRecord source = row.source();
             records.add(new TestCaseRecord(Ids.newId(), tenantId, batchId, plan.schema().code(), "CLONE",
                     rowNo, source.sourceRow(), row.testCaseId(), TestCaseIdSource.CLONE.name(),
-                    row.originalRecordId(), row.businessRecordId(), row.keyValue(),
+                    row.originalRecordId(), row.businessRecordId(), row.coreBusinessRecordId(), row.keyValue(),
                     codec.dataJson(plan.schema(), row.data()),
-                    source.managedJson(), source.formulaJson(), source.extrasJson(),
+                    source.managedJson(), codec.rawJson(row.texts()), source.formulaJson(),
+                    source.extrasJson(),
                     source.formulaCount(), buildSearchText(plan.schema(), row), "ACTIVE", 0, source.id(), now,
                     now));
         }
@@ -156,25 +159,41 @@ public class CloneService {
         List<PlannedRow> rows = new ArrayList<>(sources.size() * request.copies());
         Set<String> plannedKeys = new HashSet<>();
         for (TestCaseRecord source : sources) {
-            Map<String, Object> baseData = new LinkedHashMap<>(json.toMap(source.dataJson()));
-            Object baseKey = baseData.get(keyField.key());
-            String baseKeyText = baseKey == null ? "" : FieldCodec.canonical(keyField, baseKey);
+            CellTexts sourceTexts = codec.texts(source);
+            Map<String, Object> baseData = new LinkedHashMap<>();
+            json.toMap(source.dataJson()).forEach((key, value) -> {
+                FieldDef field = schema.byKey().get(key);
+                if (field != null && field.type().normalized() && value != null) {
+                    baseData.put(key, value);
+                }
+            });
+            String baseKeyText = sourceTexts.trade(keyField.key()) == null
+                    ? "" : sourceTexts.trade(keyField.key());
             for (int sequence = 1; sequence <= request.copies(); sequence++) {
                 NamingTemplate.Context context = new NamingTemplate.Context(baseKeyText, sequence, uuid, today,
                         batchIdOf(source));
                 String newKey = NamingTemplate.render(template, context);
                 Map<String, Object> data = new LinkedHashMap<>(baseData);
-                data.put(keyField.key(), newKey);
+                if (keyField.type().normalized()) {
+                    data.put(keyField.key(), newKey);
+                }
                 String testCaseId = NamingTemplate.render(template,
                         new NamingTemplate.Context(source.testCaseId(), sequence, uuid, today, "clone"));
                 String originalRecordId = RecordIdGenerator.cloneOriginalId(source.originalRecordId(), sequence,
                         properties.getIds().getHashLength());
                 Map<String, String> formulas = codec.tradeFormulas(source.formulaJson());
+                Map<String, String> rawData = new LinkedHashMap<>(sourceTexts.data());
+                rawData.put(keyField.key(), newKey);
+                CellTexts texts = new CellTexts(rawData,
+                        new LinkedHashMap<>(sourceTexts.managed()));
                 Map<String, String> hashFormulas = properties.getIds().isNormalizeFormulaRefs()
                         ? Formulas.normalized(formulas) : formulas;
-                String businessRecordId = RecordIdGenerator.businessId(schema, data, hashFormulas,
+                String businessRecordId = RecordIdGenerator.businessId(schema, texts, hashFormulas,
                         properties.getIds().getHashLength());
-                rows.add(new PlannedRow(source, data, testCaseId, originalRecordId, businessRecordId, newKey));
+                String coreBusinessRecordId = RecordIdGenerator.coreBusinessId(schema, texts, hashFormulas,
+                        properties.getIds().getHashLength());
+                rows.add(new PlannedRow(source, data, texts, testCaseId, originalRecordId, businessRecordId,
+                        coreBusinessRecordId, newKey));
                 plannedKeys.add(newKey);
             }
         }
@@ -213,12 +232,8 @@ public class CloneService {
         StringBuilder sb = new StringBuilder();
         append(sb, row.testCaseId());
         append(sb, row.keyValue());
-        for (FieldDef field : schema.fields()) {
-            Object value = row.data().get(field.key());
-            if (value != null) {
-                append(sb, codec.displayValue(schema, field.key(), value));
-            }
-        }
+        row.texts().data().values().forEach(value -> append(sb, value));
+        row.texts().managed().values().forEach(value -> append(sb, value));
         return sb.toString();
     }
 
@@ -232,8 +247,9 @@ public class CloneService {
         sb.append(value);
     }
 
-    private record PlannedRow(TestCaseRecord source, Map<String, Object> data, String testCaseId,
-            String originalRecordId, String businessRecordId, String keyValue) {
+    private record PlannedRow(TestCaseRecord source, Map<String, Object> data, CellTexts texts,
+            String testCaseId, String originalRecordId, String businessRecordId, String coreBusinessRecordId,
+            String keyValue) {
     }
 
     private record Plan(ProductSchema schema, String parentBatchId, int sourceCount, List<PlannedRow> rows,

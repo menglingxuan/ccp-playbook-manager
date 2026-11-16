@@ -14,7 +14,7 @@
     <div class="console-search">
       <input type="search" id="globalSearch" autocomplete="off"
              placeholder="搜索批次 / 用例 / 字段值…  支持 tag: product: case: value: scope:"
-             title="回车执行全局搜索（G）；限定词：tag: product: batch: case: value: note: file: scope:">
+             title="回车执行全局搜索（G）；限定词：tag: product: batch: case: value: note: file: scope:" aria-label="搜索批次 / 用例 / 字段值…  支持 tag: product: case: value: scope:">
       <button class="tool-btn" id="globalSearchBtn" title="全局搜索（G）">全局搜索</button>
       <button class="tool-btn ghost" id="consoleHelpBtn" title="快捷键与语法（?）">?</button>
     </div>
@@ -27,10 +27,9 @@
         <span class="side-title">用例</span>
         <span class="side-count" id="caseCount">0</span>
         <span class="side-nav" id="caseNav"></span>
-        <button class="side-btn" id="sideCollapse" title="折叠侧栏">‹</button>
       </div>
       <div class="side-filters">
-        <input type="search" id="caseSearch" placeholder="搜索用例 ID / Trade ID / 字段值…">
+        <input type="search" id="caseSearch" placeholder="搜索用例 ID / Trade ID / 字段值…" aria-label="搜索用例 ID / Trade ID / 字段值…">
         <div class="side-filter-row">
           <select id="caseSort">
             <option value="row">原始顺序</option>
@@ -51,8 +50,6 @@
       <div class="side-list" id="caseList"></div>
       <div class="side-foot" id="caseFoot"></div>
     </aside>
-
-    <button class="side-expand" id="sideExpand" title="展开侧栏" hidden>›</button>
 
     <section class="console-main" id="consoleMain">
       <div class="detail-head" id="detailHead"></div>

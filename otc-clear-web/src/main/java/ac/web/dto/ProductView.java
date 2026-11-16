@@ -38,6 +38,7 @@ public record ProductView(
      * @param role          trade or key role
      * @param required      whether the value must be present
      * @param businessKey   whether the field contributes to the business id
+     * @param keyField      whether the field is the unique key of the product
      * @param duplicate     true when another field shares the header
      * @param tags          field tags
      */
@@ -49,6 +50,7 @@ public record ProductView(
             String role,
             boolean required,
             boolean businessKey,
+            boolean keyField,
             boolean duplicate,
             List<String> tags) {
 
@@ -58,8 +60,8 @@ public record ProductView(
 
         public static FieldView of(FieldDef field) {
             return new FieldView(field.key(), field.order(), field.header(), field.type().name(),
-                    field.role().name(), field.required(), field.businessKey(), field.hasDuplicateHeader(),
-                    field.tags());
+                    field.role().name(), field.required(), field.businessKey(), field.isKey(),
+                    field.hasDuplicateHeader(), field.tags());
         }
     }
 

@@ -1,5 +1,6 @@
 package ac.domain.analysis;
 
+import ac.domain.casefile.CellTexts;
 import ac.domain.casefile.ValidationIssue;
 import java.util.List;
 import java.util.Map;
@@ -11,6 +12,7 @@ public record SampleRow(
         Map<String, String> formulas,
         Map<String, String> managed,
         Map<String, String> extras,
+        CellTexts rawTexts,
         List<ValidationIssue> issues,
         boolean valid) {
 
@@ -19,6 +21,12 @@ public record SampleRow(
         formulas = Map.copyOf(formulas);
         managed = Map.copyOf(managed);
         extras = Map.copyOf(extras);
+        rawTexts = rawTexts == null ? CellTexts.EMPTY : rawTexts;
         issues = List.copyOf(issues);
+    }
+
+    /** Texts of this row: original cell texts first, typed values as the fallback. */
+    public CellTexts texts() {
+        return CellTexts.of(values, managed, rawTexts);
     }
 }

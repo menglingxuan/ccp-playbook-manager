@@ -13,6 +13,7 @@ import java.util.List;
  * @param testCaseId        test case id
  * @param originalRecordId  original record id
  * @param businessRecordId  business record id
+ * @param coreBusinessRecordId business record id restricted to the business (trade) fields
  * @param keyValue          unique field value
  * @param formulaCount      number of captured formulas
  * @param version           optimistic lock version
@@ -27,6 +28,7 @@ public record CaseSummary(
         String testCaseId,
         String originalRecordId,
         String businessRecordId,
+        String coreBusinessRecordId,
         String keyValue,
         int formulaCount,
         int version,

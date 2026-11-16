@@ -7,6 +7,7 @@ public record ImportBatchRow(
         String id,
         String tenantId,
         String taskId,
+        String name,
         String uploadId,
         String kind,
         String parentBatchId,

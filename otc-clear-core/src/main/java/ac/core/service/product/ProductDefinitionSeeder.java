@@ -12,6 +12,8 @@ import ac.core.persistence.ProductRepository.ProductFieldRow;
 import ac.core.persistence.ProductRepository.ProductRow;
 import ac.core.persistence.SettingRepository;
 import ac.core.service.meta.MetaService;
+import ac.core.service.meta.MetaSetType;
+import ac.core.service.meta.RequiredMeta;
 import ac.domain.product.BaseProductCode;
 import ac.domain.product.ColumnNames;
 import ac.domain.product.PlatformCode;
@@ -280,11 +282,39 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
             log.info("Seeded product definitions for tenant {}", tenantId);
             return;
         }
+        // an existing database keeps its catalogue, but the values the application needs are restored
+        ensureRequiredMeta(tenantId);
         if (MARKER_VALUE.equals(marker.get())) {
             return;
         }
         upgradeToCurrentVersion(tenantId, marker.get());
         settings.put(tenantId, MARKER_KEY, MARKER_VALUE, time.nowUtc());
+    }
+
+    /**
+     * Restores the meta values the application depends on ({@link RequiredMeta}) when they are
+     * missing, so a fresh or manually trimmed database never misses a value type or role.
+     *
+     * <p>Existing entries are left untouched: their labels and order belong to the user.
+     */
+    private void ensureRequiredMeta(String tenantId) {
+        for (RequiredMeta.SetDef def : RequiredMeta.SETS) {
+            if (metaRepository.set(tenantId, def.code()).isEmpty()) {
+                metaRepository.insertSet(tenantId, new MetaRepository.MetaSetRow(def.code(), def.name(),
+                        def.description(), true, 0, MetaSetType.VALUE.name()), time.nowUtc());
+                log.info("Created required meta set {} for tenant {}", def.code(), tenantId);
+            }
+            int order = metaRepository.items(tenantId, def.code()).size();
+            for (RequiredMeta.ItemDef item : def.items()) {
+                if (metaRepository.item(tenantId, def.code(), item.code()).isPresent()) {
+                    continue;
+                }
+                order++;
+                metaRepository.insertItem(tenantId, new MetaRepository.MetaItemRow(def.code(), item.code(),
+                        item.label(), item.refSetCode(), order, true, null, null, null, null), time.nowUtc());
+                log.info("Restored required meta value {}/{} for tenant {}", def.code(), item.code(), tenantId);
+            }
+        }
     }
 
     /**
@@ -362,7 +392,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
     private BaseFieldRow writeSingleField(String tenantId, String baseProductId, SeedField field, int order) {
         BaseFieldRow row = new BaseFieldRow(Ids.newId(), tenantId, baseProductId, field.key(), field.header(),
                 field.header(), field.aliases(), field.valueTypeCode(), field.roleCode(), field.tags(),
-                field.required(), true, field.keyFlag(), order, null, "", "");
+                field.required(), true, field.keyFlag(), order, null, "", "", null);
         baseRepository.insertField(row);
         return row;
     }
@@ -374,7 +404,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
                 baseField.valueTypeCode(), baseField.roleCode(), baseField.tags(),
                 isBusinessRole(baseField.roleCode()) || baseField.required(), baseField.businessKey(),
                 baseField.keyFlag(), order, baseField.remark(), baseField.formatHint(),
-                baseField.clonePattern()), time.nowUtc());
+                baseField.clonePattern(), baseField.validationExpr()), time.nowUtc());
     }
 
     /**
@@ -429,7 +459,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
             order++;
             BaseFieldRow row = new BaseFieldRow(Ids.newId(), tenantId, baseProductId, field.key(), field.header(),
                     field.header(), field.aliases(), field.valueTypeCode(), field.roleCode(), field.tags(),
-                    field.required(), true, field.keyFlag(), order, null, "", "");
+                    field.required(), true, field.keyFlag(), order, null, "", "", null);
             baseRepository.insertField(row);
             inserted.add(row);
         }
@@ -446,7 +476,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
                     field.fieldKey(), field.header(), field.displayName(), field.aliases(),
                     field.valueTypeCode(), field.roleCode(), field.tags(), field.required(),
                     field.businessKey(), field.keyFlag(), order, field.remark(), field.formatHint(),
-                    field.clonePattern()), now);
+                    field.clonePattern(), field.validationExpr()), now);
         }
     }
 
@@ -539,11 +569,11 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
     private void upsertRoleItem(String tenantId, String code, String label, int sortOrder) {
         if (metaRepository.item(tenantId, MetaService.FIELD_ROLE_SET, code).isPresent()) {
             metaRepository.updateItem(tenantId, MetaService.FIELD_ROLE_SET, code, label, null, sortOrder,
-                    true, null, time.nowUtc());
+                    true, null, null, null, null, time.nowUtc());
             return;
         }
         metaRepository.insertItem(tenantId, new MetaRepository.MetaItemRow(MetaService.FIELD_ROLE_SET, code,
-                label, null, sortOrder, true, null), time.nowUtc());
+                label, null, sortOrder, true, null, null, null, null), time.nowUtc());
     }
 
     private void replaceCcsirsFields(String tenantId) {
@@ -582,7 +612,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
             order++;
             baseRepository.insertField(new BaseFieldRow(Ids.newId(), tenantId, baseProductId, field.key(),
                     field.header(), field.header(), field.aliases(), field.valueTypeCode(), field.roleCode(),
-                    field.tags(), field.required(), true, field.keyFlag(), order, null, "", ""));
+                    field.tags(), field.required(), true, field.keyFlag(), order, null, "", "", null));
         }
         log.debug("Wrote {} fields for base product {}", order, baseProductId);
     }
@@ -597,7 +627,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
                     field.valueTypeCode(), field.roleCode(), field.tags(),
                     isBusinessRole(field.roleCode()) || field.required(),
                     field.businessKey(), field.keyFlag(), order, field.remark(), field.formatHint(),
-                    field.clonePattern()), now);
+                    field.clonePattern(), field.validationExpr()), now);
         }
     }
 
@@ -610,31 +640,33 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
 
     private void seedMeta(String tenantId) {
         LocalDateTime now = time.nowUtc();
-        seedSet(tenantId, new MetaRepository.MetaSetRow("VALUE_TYPE", "值类型", "字段取值的类型", true, 1), now,
+        seedSet(tenantId, new MetaRepository.MetaSetRow("VALUE_TYPE", "值类型", "字段取值的类型", true, 1, "VALUE"), now,
                 List.of(
                         item("TEXT", "文本", null),
                         item("INTEGER", "整数", null),
                         item("DECIMAL", "小数", null),
                         item("DATE", "日期", null),
+                        item("TIME", "时间", null),
+                        item("DATETIME", "日期时间", null),
                         item("BOOLEAN", "布尔", null),
                         item("CONV_METHOD", "Conversion Method（枚举引用）", "CONV_METHOD")));
-        seedSet(tenantId, new MetaRepository.MetaSetRow("FIELD_ROLE", "角色类型", "字段在交易块中的角色", true, 2),
+        seedSet(tenantId, new MetaRepository.MetaSetRow("FIELD_ROLE", "角色类型", "字段在交易块中的角色", true, 2, "VALUE"),
                 now, List.of(item("BUSINESS", "业务字段", null), item("MANAGED", "管理字段", null)));
-        seedSet(tenantId, new MetaRepository.MetaSetRow("FIELD_TAG", "字段标签", "用于分类与检索的标签", true, 3),
+        seedSet(tenantId, new MetaRepository.MetaSetRow("FIELD_TAG", "字段标签", "用于分类与检索的标签", true, 3, "VALUE"),
                 now, List.of(
                         item("CLEARING", "清算", null),
                         item("REPORT", "报文", null),
                         item("RISK", "风险", null),
                         item("CHECK", "核对", null)));
         seedSet(tenantId, new MetaRepository.MetaSetRow("CONV_METHOD", "Conversion Method",
-                "业务日调整方式示例枚举", true, 4), now, List.of(
+                "业务日调整方式示例枚举", true, 4, "VALUE"), now, List.of(
                 item("MODFOLLOWING", "Modified Following", null),
                 item("FLOWING", "Flowing", null),
                 item("PRECEDING", "Preceding", null)));
     }
 
     private MetaRepository.MetaItemRow item(String code, String label, String refSet) {
-        return new MetaRepository.MetaItemRow(null, code, label, refSet, 0, true, null);
+        return new MetaRepository.MetaItemRow(null, code, label, refSet, 0, true, null, null, null, null);
     }
 
     private void seedSet(String tenantId, MetaRepository.MetaSetRow set, LocalDateTime now,
@@ -644,7 +676,8 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
         for (MetaRepository.MetaItemRow item : items) {
             order++;
             metaRepository.insertItem(tenantId, new MetaRepository.MetaItemRow(set.code(), item.code(),
-                    item.label(), item.refSetCode(), order, true, item.remark()), now);
+                    item.label(), item.refSetCode(), order, true, item.remark(), item.content(),
+                    item.ruleType(), item.severity()), now);
         }
     }
 
@@ -697,7 +730,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
             order++;
             baseRepository.insertField(new BaseFieldRow(Ids.newId(), tenantId, row.id(), field.key(),
                     field.header(), field.header(), field.aliases(), field.valueTypeCode(), field.roleCode(),
-                    field.tags(), field.required(), true, field.keyFlag(), order, null, "", ""));
+                    field.tags(), field.required(), true, field.keyFlag(), order, null, "", "", null));
         }
         ProductSchema schema = schemaMapper.toBaseSchema(row,
                 baseRepository.listFields(tenantId, row.id()), metaLookup.load(tenantId));
@@ -757,7 +790,7 @@ public class ProductDefinitionSeeder implements ApplicationRunner {
                     field.valueTypeCode(), field.roleCode(), field.tags(),
                     isBusinessRole(field.roleCode()) || field.required(),
                     field.businessKey(), field.keyFlag(), order, field.remark(), field.formatHint(),
-                    field.clonePattern()), now);
+                    field.clonePattern(), field.validationExpr()), now);
         }
         refreshSchemaHash(tenantId, product);
     }

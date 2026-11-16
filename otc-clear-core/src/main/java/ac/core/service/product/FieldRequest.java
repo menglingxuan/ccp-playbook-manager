@@ -15,6 +15,8 @@ import java.util.List;
  * @param required      whether the value must be present
  * @param remark        free form note
  * @param sortOrder     1-based order; appended when {@code null}
+ * @param validationExpr rule codes combined with {@code AND}, {@code OR}, {@code NOT} and parentheses;
+ *                       blank clears the binding
  */
 public record FieldRequest(
         String fieldKey,
@@ -26,7 +28,8 @@ public record FieldRequest(
         List<String> tags,
         boolean required,
         String remark,
-        Integer sortOrder) {
+        Integer sortOrder,
+        String validationExpr) {
 
     public FieldRequest {
         aliases = aliases == null ? List.of() : List.copyOf(aliases);

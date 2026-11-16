@@ -26,7 +26,7 @@ public class ProductRepository {
     public record ProductFieldRow(String id, String tenantId, String productId, String baseFieldId,
             String fieldKey, String header, String displayName, List<String> aliases, String valueTypeCode,
             String roleCode, List<String> tags, boolean required, boolean businessKey, boolean keyFlag,
-            int sortOrder, String remark, String formatHint, String clonePattern) {
+            int sortOrder, String remark, String formatHint, String clonePattern, String validationExpr) {
     }
 
     private static final String PRODUCT_COLUMNS = """
@@ -37,7 +37,7 @@ public class ProductRepository {
     private static final String FIELD_COLUMNS = """
             id, tenant_id, product_id, base_field_id, field_key, header, display_name, aliases,
             value_type_code, role_code, tags, required_flag, business_key, key_flag, sort_order, remark,
-            format_hint, clone_pattern
+            format_hint, clone_pattern, validation_expr
             """;
 
     public void insert(ProductRow row) {
@@ -128,10 +128,11 @@ public class ProductRepository {
         jdbc.sql("""
                         INSERT INTO product_field (id, tenant_id, product_id, base_field_id, field_key, header,
                             display_name, aliases, value_type_code, role_code, tags, required_flag, business_key,
-                            key_flag, sort_order, remark, format_hint, clone_pattern, created_at, updated_at)
+                            key_flag, sort_order, remark, format_hint, clone_pattern, validation_expr,
+                            created_at, updated_at)
                         VALUES (:id, :tenantId, :productId, :baseFieldId, :fieldKey, :header, :displayName,
                             :aliases, :valueTypeCode, :roleCode, :tags, :required, :businessKey, :keyFlag,
-                            :sortOrder, :remark, :formatHint, :clonePattern, :now, :now)
+                            :sortOrder, :remark, :formatHint, :clonePattern, :validationExpr, :now, :now)
                         """)
                 .param("id", row.id()).param("tenantId", row.tenantId()).param("productId", row.productId())
                 .param("baseFieldId", row.baseFieldId()).param("fieldKey", row.fieldKey())
@@ -142,7 +143,8 @@ public class ProductRepository {
                 .param("businessKey", row.businessKey()).param("keyFlag", row.keyFlag())
                 .param("sortOrder", row.sortOrder())
                 .param("remark", row.remark()).param("formatHint", row.formatHint())
-                .param("clonePattern", row.clonePattern()).param("now", now).update();
+                .param("clonePattern", row.clonePattern()).param("validationExpr", row.validationExpr())
+                .param("now", now).update();
     }
 
     public void updateField(ProductFieldRow row, LocalDateTime updatedAt) {
@@ -151,7 +153,8 @@ public class ProductRepository {
                             aliases = :aliases, value_type_code = :valueTypeCode, role_code = :roleCode,
                             tags = :tags, required_flag = :required, business_key = :businessKey,
                             key_flag = :keyFlag, sort_order = :sortOrder, remark = :remark,
-                            format_hint = :formatHint, clone_pattern = :clonePattern, updated_at = :updatedAt
+                            format_hint = :formatHint, clone_pattern = :clonePattern,
+                            validation_expr = :validationExpr, updated_at = :updatedAt
                         WHERE id = :id
                         """)
                 .param("header", row.header()).param("displayName", row.displayName())
@@ -161,7 +164,8 @@ public class ProductRepository {
                 .param("businessKey", row.businessKey()).param("keyFlag", row.keyFlag())
                 .param("sortOrder", row.sortOrder())
                 .param("remark", row.remark()).param("formatHint", row.formatHint())
-                .param("clonePattern", row.clonePattern()).param("updatedAt", updatedAt)
+                .param("clonePattern", row.clonePattern()).param("validationExpr", row.validationExpr())
+                .param("updatedAt", updatedAt)
                 .param("id", row.id()).update();
     }
 
@@ -214,6 +218,6 @@ public class ProductRepository {
                 rs.getString("value_type_code"), rs.getString("role_code"), TagCodec.decode(rs.getString("tags")),
                 rs.getBoolean("required_flag"), rs.getBoolean("business_key"), rs.getBoolean("key_flag"),
                 rs.getInt("sort_order"), rs.getString("remark"), rs.getString("format_hint"),
-                rs.getString("clone_pattern"));
+                rs.getString("clone_pattern"), rs.getString("validation_expr"));
     }
 }

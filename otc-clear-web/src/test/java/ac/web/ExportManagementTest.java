@@ -58,6 +58,59 @@ class ExportManagementTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void caseSelectionExportsKeepTheSourceBatchForLinking() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String batchId = importBatch("export_sel_" + suffix, "EXPSEL-" + suffix);
+        List<String> caseIds = new ArrayList<>();
+        api.get("/api/batches/" + batchId + "/cases?size=50").json().get("items")
+                .forEach(item -> caseIds.add(item.get("id").asString()));
+        assertThat(caseIds).hasSize(2);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("caseIds", List.of(caseIds.get(0)));
+        payload.put("recalculateFormulas", false);
+        var response = api.post("/api/exports", api.toJson(payload));
+        assertThat(response.ok()).as(response.body()).isTrue();
+        String exportId = response.json().get("exportId").asString();
+
+        JsonNode item = api.get("/api/exports?q=" + exportId).json().get("items").get(0);
+        // the scope stays a selection, but the batch it came from is kept so the list can link back
+        assertThat(item.get("scopeType").asString()).isEqualTo("SELECTION");
+        assertThat(item.get("batchId").asString()).isEqualTo(batchId);
+        assertThat(item.get("rowCount").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void previewExposesTheStoredRowsWithoutDownloading() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String batchId = importBatch("export_preview_" + suffix, "EXPV-" + suffix);
+        String exportId = createExport(batchId);
+
+        JsonNode preview = api.get("/api/exports/" + exportId + "/preview").json();
+        assertThat(preview.get("fileName").asString()).endsWith(".csv");
+        assertThat(preview.get("rowCount").asInt()).isEqualTo(2);
+        assertThat(preview.get("shownRows").asInt()).isEqualTo(2);
+        assertThat(preview.get("truncated").asBoolean()).isFalse();
+        List<String> headers = new ArrayList<>();
+        preview.get("headers").forEach(node -> headers.add(node.asString()));
+        assertThat(headers).contains("_TestCaseId", "Trade ID", "Notional");
+        assertThat(preview.get("rows")).hasSize(2);
+        int tradeIdColumn = headers.indexOf("Trade ID");
+        assertThat(preview.get("rows").get(0).get(tradeIdColumn).asString()).isEqualTo("EXPV-" + suffix);
+        // quoted values with a delimiter survive the round trip as the original cell text
+        int notionalColumn = headers.indexOf("Notional");
+        assertThat(preview.get("rows").get(0).get(notionalColumn).asString()).isEqualTo("1,500,000.00");
+
+        // the limit truncates instead of failing
+        JsonNode limited = api.get("/api/exports/" + exportId + "/preview?limit=1").json();
+        assertThat(limited.get("shownRows").asInt()).isEqualTo(1);
+        assertThat(limited.get("truncated").asBoolean()).isTrue();
+        assertThat(limited.get("rows")).hasSize(1);
+
+        assertThat(api.get("/api/exports/no-such-export/preview").status()).isEqualTo(404);
+    }
+
+    @Test
     void deletingAnExportRemovesTheRecordAndTheFile() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String batchId = importBatch("export_del_" + suffix, "EXPD-" + suffix);
@@ -89,6 +142,45 @@ class ExportManagementTest extends AbstractIntegrationTest {
         List<String> ids = new ArrayList<>();
         page.get("items").forEach(item -> ids.add(item.get("id").asString()));
         return ids;
+    }
+
+    @Test
+    void partialOptionsFallBackToTheStoredDefaults() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String batchId = importBatch("export_opts_" + suffix, "EXPOPT-" + suffix);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("batchId", batchId);
+        // only one option is sent: everything else has to come from the stored defaults
+        payload.put("options", Map.of("lineEnding", "LF"));
+        var response = api.post("/api/exports", api.toJson(payload));
+        assertThat(response.ok()).as(response.body()).isTrue();
+        String exportId = response.json().get("exportId").asString();
+
+        JsonNode stored = api.get("/api/exports?q=" + exportId).json().get("items").get(0).get("options");
+        assertThat(stored.get("delimiter").asString()).isEqualTo(",");
+        assertThat(stored.get("managedColumns").asString()).isEqualTo("KNOWN");
+        assertThat(stored.get("lineEnding").asString()).isEqualTo("LF");
+        assertThat(stored.get("bom").asBoolean()).isFalse();
+
+        String csv = new String(api.getBytes("/api/exports/" + exportId + "/download"),
+                StandardCharsets.UTF_8);
+        assertThat(csv).startsWith("Trade ID,").contains("EXPOPT-" + suffix);
+        assertThat(csv.split("\n")).hasSize(3);
+    }
+
+    @Test
+    void unusableLineEndingIsRejected() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String batchId = importBatch("export_badopts_" + suffix, "EXPBAD-" + suffix);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("batchId", batchId);
+        payload.put("options", Map.of("lineEnding", "\r\n===injected===\r\n"));
+        var response = api.post("/api/exports", api.toJson(payload));
+
+        assertThat(response.status()).isEqualTo(400);
+        assertThat(response.json().get("code").asString()).isEqualTo("INVALID_REQUEST");
     }
 
     private String createExport(String batchId) {

@@ -7,7 +7,8 @@ import java.util.Map;
 /**
  * Full case payload used by the detail and edit views.
  *
- * @param data               field key to stored value
+ * @param data               field key to normalized value (date, time, date time, boolean, number only)
+ * @param values             field key to the original text shown on every screen
  * @param managed            managed key to text
  * @param formulas           trade field key to formula text
  * @param managedFormulas    managed key to formula text
@@ -25,9 +26,11 @@ public record CaseDetail(
         String testCaseIdSource,
         String originalRecordId,
         String businessRecordId,
+        String coreBusinessRecordId,
         String keyValue,
         int version,
         Map<String, Object> data,
+        Map<String, String> values,
         Map<String, String> managed,
         Map<String, String> formulas,
         Map<String, String> managedFormulas,

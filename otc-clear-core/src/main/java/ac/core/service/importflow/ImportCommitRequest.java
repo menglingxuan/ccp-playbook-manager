@@ -12,10 +12,13 @@ import java.util.List;
  * @param includeUnmappedColumns store the values of columns that match no field; defaults to false
  * @param stopAtEmptyRow         stop at the first empty row instead of skipping it; defaults to false
  * @param stopAtFirstError       stop before the first row with import errors; defaults to true
+ * @param taskName               optional task name or task id: an existing task is looked up by id
+ *                               first, then by name, and receives the new batches; otherwise a task
+ *                               with that name is created; blank keeps the default task naming
  */
 public record ImportCommitRequest(String uploadId, List<ImportSelection> sheets, boolean force,
         Boolean includeManagedColumns, Boolean includeUnmappedColumns, Boolean stopAtEmptyRow,
-        Boolean stopAtFirstError) {
+        Boolean stopAtFirstError, String taskName) {
 
     public ImportCommitRequest {
         sheets = sheets == null ? List.of() : List.copyOf(sheets);
@@ -35,5 +38,10 @@ public record ImportCommitRequest(String uploadId, List<ImportSelection> sheets,
 
     public boolean stopAtFirstErrorEnabled() {
         return stopAtFirstError == null || stopAtFirstError;
+    }
+
+    /** Requested task name without surrounding blanks, empty when the default naming applies. */
+    public String requestedTaskName() {
+        return taskName == null ? "" : taskName.trim();
     }
 }

@@ -1,5 +1,6 @@
 package ac.core.service.importflow;
 
+import ac.core.common.ApiException;
 import ac.core.common.Ids;
 import ac.core.common.JsonSupport;
 import ac.core.common.TimeProvider;
@@ -13,23 +14,30 @@ import ac.core.persistence.TestCaseRepository;
 import ac.core.service.baseline.BaselineStore;
 import ac.core.service.cases.CaseJsonCodec;
 import ac.core.service.product.ProductCatalog;
+import ac.core.service.validation.FieldRules;
+import ac.core.service.validation.RowValidation;
+import ac.core.service.task.TaskService;
 import ac.domain.analysis.ImportStopPolicy;
 import ac.domain.analysis.PreviewOptions;
 import ac.domain.analysis.SheetAnalysis;
 import ac.domain.analysis.SheetAnalyzer;
 import ac.domain.casefile.CaseRow;
+import ac.domain.casefile.CellTexts;
 import ac.domain.casefile.IssueLevel;
 import ac.domain.casefile.UnresolvedFormula;
 import ac.domain.casefile.ValidationIssue;
 import ac.domain.layout.SheetLayout;
 import ac.domain.product.ProductSchema;
 import ac.domain.table.RawTable;
+import ac.domain.validation.ValidationOptions;
+import ac.domain.validation.ValidationSeverity;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -83,11 +91,12 @@ public class ImportService {
     private final TimeProvider time;
     private final AppProperties properties;
     private final BaselineStore baselineStore;
+    private final FieldRules fieldRules;
 
     public ImportService(UploadStore uploadStore, PreviewService previewService, SheetCache sheetCache,
             ProductCatalog products, ImportTaskRepository taskRepository,
             ImportBatchRepository batchRepository, TestCaseRepository caseRepository, CaseJsonCodec codec, JsonSupport json, TimeProvider time, AppProperties properties,
-            BaselineStore baselineStore) {
+            BaselineStore baselineStore, FieldRules fieldRules) {
         this.uploadStore = uploadStore;
         this.previewService = previewService;
         this.sheetCache = sheetCache;
@@ -100,6 +109,7 @@ public class ImportService {
         this.time = time;
         this.properties = properties;
         this.baselineStore = baselineStore;
+        this.fieldRules = fieldRules;
     }
 
     @Transactional
@@ -109,10 +119,29 @@ public class ImportService {
         }
         StoredUpload upload = uploadStore.require(tenantId, request.uploadId());
         LocalDateTime now = time.nowUtc();
-        String taskId = Ids.newId();
+        String requestedTaskName = request.requestedTaskName();
+        if (requestedTaskName.length() > TaskService.MAX_NAME_LENGTH) {
+            throw ac.core.common.ApiException.invalid(
+                    "The task name exceeds " + TaskService.MAX_NAME_LENGTH + " characters");
+        }
+        Optional<ImportTaskRow> existingTask = requestedTaskName.isEmpty()
+                ? Optional.empty()
+                : resolveTask(tenantId, requestedTaskName);
+        existingTask.filter(task -> "DELETED".equals(task.status())).ifPresent(task -> {
+            throw new ApiException(ac.core.common.ErrorCode.CONFLICT,
+                    "The task '" + requestedTaskName + "' is deleted, choose another one");
+        });
+        boolean joined = existingTask.isPresent();
+        String taskId = existingTask.map(ImportTaskRow::id).orElseGet(Ids::newId);
 
-        insertTask(tenantId, taskId, upload, request, now);
-        taskRepository.markRunning(tenantId, taskId, now);
+        if (joined) {
+            // the batches are appended to the existing task; its status and counters are reconciled below
+            taskRepository.markRunning(tenantId, taskId, now);
+        } else {
+            // the task starts as RUNNING: the whole commit runs in one transaction, so a "queued" state
+            // would never be observable
+            insertTask(tenantId, taskId, upload, request, requestedTaskName, now);
+        }
 
         List<ValidationIssue> issues = new ArrayList<>();
         List<BatchImportResult> batches = new ArrayList<>();
@@ -152,11 +181,14 @@ public class ImportService {
 
                 DuplicateFilter duplicateFilter = filterDuplicateKeys(analysis, issues,
                         request.stopAtFirstErrorEnabled());
-                List<CaseRow> rows = duplicateFilter.rows();
+                RuleFilter ruleFilter = withRuleIssues(tenantId, schema, duplicateFilter.rows(), issues,
+                        request.stopAtFirstErrorEnabled());
+                List<CaseRow> rows = ruleFilter.rows();
                 String batchId = Ids.newId();
                 SheetLayout layout = analysis.layout();
-                int invalid = analysis.invalidRows() + duplicateFilter.rejected();
-                batchRepository.insert(new ImportBatchRow(batchId, tenantId, taskId, upload.uploadId(), "IMPORT",
+                int invalid = analysis.invalidRows() + duplicateFilter.rejected() + ruleFilter.rejected();
+                batchRepository.insert(new ImportBatchRow(batchId, tenantId, taskId,
+                        batchRepository.nextDefaultName(tenantId, taskId), upload.uploadId(), "IMPORT",
                         null, schema.code(), upload.fileName(), upload.sha256(), upload.sourceType(),
                         table.sheetName(), layout.headerRow(), layout.tradeStartColumn(),
                         layout.tradeEndColumn(), layoutJson(layout), mappingJson(layout), schema.schemaHash(),
@@ -190,8 +222,17 @@ public class ImportService {
         String message = batches.isEmpty() ? "No sheet could be imported"
                 : failedSheets > 0 ? failedSheets + " sheet(s) failed" : null;
         List<ValidationIssue> capped = capIssues(issues);
-        taskRepository.finish(tenantId, taskId, status, request.sheets().size(), batches.size(), totalValid,
-                totalInvalid, issuesJson(capped), message, time.nowUtc());
+        if (joined) {
+            // the joined task keeps its own source file; only the counters grow, and the status has to be
+            // reconciled because the append may have left the task in RUNNING
+            taskRepository.addCounts(tenantId, taskId, request.sheets().size(), batches.size(), totalValid,
+                    totalInvalid);
+            taskRepository.reconcileStatus(tenantId, taskId,
+                    joinedStatus(existingTask.get(), status, batches.size()), message, time.nowUtc());
+        } else {
+            taskRepository.finish(tenantId, taskId, status, request.sheets().size(), batches.size(), totalValid,
+                    totalInvalid, issuesJson(capped), message, time.nowUtc());
+        }
         sheetCache.evict(upload.uploadId());
 
         Map<String, Object> auditDetail = new LinkedHashMap<>();
@@ -199,7 +240,8 @@ public class ImportService {
         auditDetail.put("rows", totalValid);
         auditDetail.put("invalidRows", totalInvalid);
 
-        return new ImportResult(taskId, status, totalValid, totalInvalid, batches.size(),
+        String taskName = existingTask.map(ImportTaskRow::name).orElse(requestedTaskName);
+        return new ImportResult(taskId, taskName, joined, status, totalValid, totalInvalid, batches.size(),
                 batches, capped);
     }
 
@@ -342,10 +384,86 @@ public class ImportService {
         String extrasJson = extras.isEmpty() ? null : codec.extrasJson(extras);
         String formulaJson = formulas.isEmpty() && unresolved.isEmpty()
                 ? null : codec.formulaJson(schema, formulas, unresolved);
+        // dropped managed columns must disappear from the stored original texts as well
+        CellTexts rawTexts = request.managedColumnsEnabled()
+                ? row.rawTexts() : new CellTexts(row.rawTexts().data(), Map.of());
+        CellTexts storedTexts = CellTexts.of(row.data(), managed, rawTexts);
         return new TestCaseRecord(Ids.newId(), tenantId, batchId, schema.code(), "IMPORT", row.rowNo(),
                 row.sourceRow(), row.testCaseId(), row.testCaseIdSource().name(), row.originalRecordId(),
-                row.businessRecordId(), row.keyValue(), codec.dataJson(schema, row), managedJson, formulaJson,
-                extrasJson, formulas.size(), row.searchText(), "ACTIVE", 0, null, now, now);
+                row.businessRecordId(), row.coreBusinessRecordId(), row.keyValue(), codec.dataJson(schema, row),
+                managedJson, codec.rawJson(rawTexts), formulaJson, extrasJson, formulas.size(),
+                row.searchText(storedTexts, extras), "ACTIVE", 0, null, now, now);
+    }
+
+    /**
+     * Records the field rule failures of every row and rejects the rows that fail a blocking rule.
+     *
+     * <p>A rule of severity {@code WARN} only annotates the row, which is where the analyst sees it
+     * after the import completes; a rule of severity {@code ERROR} rejects the row so that an invalid
+     * value never reaches the case store.
+     */
+    private RuleFilter withRuleIssues(String tenantId, ProductSchema schema, List<CaseRow> rows,
+            List<ValidationIssue> issues, boolean stopAtFirstError) {
+        FieldRules.Plan plan = fieldRules.plan(tenantId, schema.code(), schema);
+        if (plan.empty() || rows.isEmpty()) {
+            return new RuleFilter(rows, 0);
+        }
+        Map<Integer, CellTexts> textsByRow = new LinkedHashMap<>();
+        for (CaseRow row : rows) {
+            textsByRow.put(row.sourceRow(), row.texts());
+        }
+        Map<Integer, List<FieldRules.Failure>> failures = RowValidation.byRow(
+                fieldRules.checkRows(plan, schema, textsByRow, ValidationOptions.SKIP_BLANK));
+        if (failures.isEmpty()) {
+            return new RuleFilter(rows, 0);
+        }
+        List<CaseRow> annotated = new ArrayList<>(rows.size());
+        int rejected = 0;
+        CaseRow stoppedAt = null;
+        for (CaseRow row : rows) {
+            List<FieldRules.Failure> rowFailures = failures.get(row.sourceRow());
+            if (rowFailures == null) {
+                annotated.add(row);
+                continue;
+            }
+            List<ValidationIssue> rowIssues = new ArrayList<>(row.issues());
+            boolean blocking = false;
+            for (FieldRules.Failure failure : rowFailures) {
+                boolean error = failure.severity() == ValidationSeverity.ERROR;
+                String message = "Value '" + failure.value() + "' of '" + failure.header()
+                        + "' does not match the rule " + String.join(", ", failure.failedRules());
+                rowIssues.add((error ? ValidationIssue.error("VALIDATION_FAILED", message)
+                        : ValidationIssue.warn("VALIDATION_FAILED", message))
+                        .atRow(row.sourceRow())
+                        .forField(failure.fieldKey()));
+                blocking |= error;
+            }
+            if (!blocking) {
+                annotated.add(row.withIssues(rowIssues));
+                continue;
+            }
+            issues.addAll(rowIssues);
+            rejected++;
+            if (stopAtFirstError) {
+                stoppedAt = row;
+                break;
+            }
+        }
+        if (rejected > 0) {
+            issues.add(ValidationIssue.error("VALIDATION_FAILED",
+                    rejected + " row(s) rejected because a value fails a blocking validation rule"));
+        }
+        if (stoppedAt != null) {
+            issues.add(ValidationIssue.warn("IMPORT_STOPPED",
+                    "Import stopped before row " + stoppedAt.sourceRow()
+                            + ": a value fails a blocking validation rule, "
+                            + (rows.size() - annotated.size() - 1) + " row(s) not imported"));
+        }
+        return new RuleFilter(annotated, rejected);
+    }
+
+    /** Rows kept after the blocking rule filter plus how many rows it rejected. */
+    private record RuleFilter(List<CaseRow> rows, int rejected) {
     }
 
     private String layoutJson(SheetLayout layout) {
@@ -375,15 +493,21 @@ public class ImportService {
     }
 
     /**
-     * Inserts the task row with the first free default name; a concurrent import that grabbed the
-     * same name between the lookup and the insert triggers a retry instead of a failed import.
+     * Inserts the task row with the requested name, or the first free default name when none was
+     * given; a concurrent import that grabbed the same name between the lookup and the insert
+     * triggers a retry instead of a failed import.
+     *
+     * <p>The row is created as {@code RUNNING} because a commit runs as a single transaction: a
+     * "queued" status would be invisible to every reader and only survive a crash as garbage.
      */
     private void insertTask(String tenantId, String taskId, StoredUpload upload, ImportCommitRequest request,
-            LocalDateTime now) {
+            String requestedTaskName, LocalDateTime now) {
         for (int attempt = 1; ; attempt++) {
-            ImportTaskRow row = new ImportTaskRow(taskId, tenantId, TASK_KIND, "PENDING",
-                    taskRepository.nextDefaultName(tenantId), upload.fileName(), upload.sha256(),
-                    request.sheets().size(), 0, 0, 0, paramsJson(request), null, null, "system", now, null, null);
+            ImportTaskRow row = new ImportTaskRow(taskId, tenantId, TASK_KIND, "RUNNING",
+                    requestedTaskName.isEmpty() ? taskRepository.nextDefaultName(tenantId) : requestedTaskName,
+                    upload.fileName(), upload.sha256(), upload.md5(),
+                    request.sheets().size(), 0, 0, 0, paramsJson(request), null, null, null, "system", now,
+                    now, null);
             try {
                 taskRepository.insert(row);
                 return;
@@ -395,8 +519,65 @@ public class ImportService {
         }
     }
 
-    private String paramsJson(ImportCommitRequest request) {
-        List<Map<String, Object>> items = new ArrayList<>();
+    /**
+     * Resolves the task an import should join from a task id or a task name.
+     *
+     * <p>The id is tried first so a pasted identifier always wins; a well formed id that matches no
+     * task of the tenant is reported instead of being turned into a task name.
+     */
+    private Optional<ImportTaskRow> resolveTask(String tenantId, String reference) {
+        Optional<ImportTaskRow> byId = taskRepository.find(tenantId, reference);
+        if (byId.isPresent()) {
+            return byId;
+        }
+        Optional<ImportTaskRow> byName = taskRepository.findByName(tenantId, reference);
+        if (byName.isPresent()) {
+            return byName;
+        }
+        if (looksLikeTaskId(reference)) {
+            throw ApiException.notFound("Task " + reference + " does not exist");
+        }
+        return Optional.empty();
+    }
+
+    /** True for a 36 character UUID, the shape of every task id. */
+    private static boolean looksLikeTaskId(String value) {
+        if (value.length() != 36) {
+            return false;
+        }
+        int dashes = 0;
+        for (int index = 0; index < value.length(); index++) {
+            char c = value.charAt(index);
+            if (c == '-') {
+                dashes++;
+            } else if (Character.digit(c, 16) < 0) {
+                return false;
+            }
+        }
+        return dashes == 4;
+    }
+
+    /**
+     * Status of a task after an import was appended to it.
+     *
+     * <p>Both sides count: the task stays clean only while every append stayed clean, and it drops back to
+     * {@code PARTIAL} as soon as any appended sheet is rejected. A task that ends up without a single
+     * batch is {@code FAILED}.
+     *
+     * @param existing        task row read before the append
+     * @param appendedStatus  status of this commit
+     * @param appendedBatches batches this commit wrote
+     * @return reconciled status
+     */
+    private static String joinedStatus(ImportTaskRow existing, String appendedStatus, int appendedBatches) {
+        if (existing.batchCount() + appendedBatches == 0) {
+            return "FAILED";
+        }
+        boolean previousClean = !"PARTIAL".equals(existing.status());
+        return "SUCCEEDED".equals(appendedStatus) && previousClean ? "SUCCEEDED" : "PARTIAL";
+    }
+
+    private String paramsJson(ImportCommitRequest request) {        List<Map<String, Object>> items = new ArrayList<>();
         for (ImportSelection selection : request.sheets()) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("sheetIndex", selection.resolvedSheetIndex());

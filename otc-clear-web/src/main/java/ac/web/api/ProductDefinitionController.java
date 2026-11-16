@@ -11,9 +11,11 @@ import ac.core.service.product.ProductViews.PlatformView;
 import ac.core.service.product.ProductViews.ProductDetail;
 import ac.core.service.product.ProductViews.ProductFieldView;
 import ac.core.service.product.ProductViews.ProductSummary;
+import ac.core.common.ApiException;
 import ac.web.config.TenantProvider;
 import java.util.List;
 import java.util.Map;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Product definition endpoints: platform to base product to concrete product.
@@ -102,6 +105,32 @@ public class ProductDefinitionController {
             @RequestBody HeaderImportRequest request) {
         List<String> created = definitions.importBaseFieldsFromHeaders(tenantId(), id, request.headers());
         return Map.of("created", created);
+    }
+
+    /**
+     * Creates one business field per CSV column, using the first row of the file as headers.
+     *
+     * <p>Columns matching an existing field are skipped; the fields are created as text, business,
+     * required, in file order.
+     *
+     * @param id   base product identifier
+     * @param file delimited file whose first row holds the column names
+     */
+    @PostMapping(value = "/base-products/{id}/fields/from-csv",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Map<String, Object> importFieldsFromCsv(@PathVariable String id,
+            @RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw ApiException.invalid("Choose a CSV file to read the column names from");
+        }
+        try {
+            List<String> headers = definitions.readCsvHeaders(file.getInputStream(),
+                    file.getOriginalFilename());
+            List<String> created = definitions.importBaseFieldsFromHeaders(tenantId(), id, headers);
+            return Map.of("created", created, "headers", headers.size());
+        } catch (java.io.IOException e) {
+            throw ApiException.invalid("The uploaded file could not be read");
+        }
     }
 
     @PatchMapping("/base-products/{id}/fields/{fieldId}")

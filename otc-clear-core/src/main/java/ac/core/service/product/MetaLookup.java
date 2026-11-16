@@ -12,8 +12,8 @@ import org.springframework.stereotype.Component;
  * Resolves the field meta information into the values used by field definitions.
  *
  * <p>Value types are fully meta driven: an item either names a built-in parser kind
- * ({@code TEXT}, {@code INTEGER}, {@code DECIMAL}, {@code DATE}, {@code BOOLEAN}) or references
- * another meta set, turning the field into an enumerated value.
+ * ({@code TEXT}, {@code INTEGER}, {@code DECIMAL}, {@code DATE}, {@code TIME}, {@code DATETIME},
+ * {@code BOOLEAN}) or references another meta set, turning the field into an enumerated value.
  */
 @Component
 public class MetaLookup {
@@ -113,6 +113,8 @@ public class MetaLookup {
             case "INTEGER" -> FieldType.INTEGER;
             case "DECIMAL" -> FieldType.DECIMAL;
             case "DATE" -> FieldType.DATE;
+            case "TIME" -> FieldType.TIME;
+            case "DATETIME" -> FieldType.DATETIME;
             case "BOOLEAN" -> FieldType.BOOLEAN;
             case "ENUM" -> FieldType.ENUM;
             default -> FieldType.TEXT;

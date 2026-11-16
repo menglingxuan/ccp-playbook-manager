@@ -1,7 +1,9 @@
 package ac.core.service.cases;
 
 import ac.core.common.JsonSupport;
+import ac.core.persistence.TestCaseRecord;
 import ac.domain.casefile.CaseRow;
+import ac.domain.casefile.CellTexts;
 import ac.domain.casefile.UnresolvedFormula;
 import ac.domain.product.FieldCodec;
 import ac.domain.product.FieldDef;
@@ -103,24 +105,47 @@ public class CaseJsonCodec {
         return dataJson(schema, row.data());
     }
 
-    /** Display text of one stored value. */
-    public String displayValue(ProductSchema schema, String fieldKey, Object value) {
-        if (value == null) {
-            return "";
+    /** Stores the original cell texts read at import time. */
+    public String rawJson(CellTexts texts) {
+        CellTexts source = texts == null ? CellTexts.EMPTY : texts;
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("data", source.data());
+        payload.put("managed", source.managed());
+        return json.toJson(payload);
+    }
+
+    /** Reads {@code raw_json}; an empty payload means the row was stored before raw texts existed. */
+    public CellTexts rawTexts(String rawJson) {
+        Map<String, Object> payload = json.toMapOrEmpty(rawJson);
+        return new CellTexts(stringMap(payload.get("data")), stringMap(payload.get("managed")));
+    }
+
+    /** Original texts of a stored row, falling back to the typed values for legacy rows. */
+    public CellTexts texts(TestCaseRecord record) {
+        return CellTexts.of(json.toMapOrEmpty(record.dataJson()), stringMap(record.managedJson()),
+                rawTexts(record.rawJson()));
+    }
+
+    private static Map<String, String> stringMap(Object value) {
+        if (!(value instanceof Map<?, ?> map) || map.isEmpty()) {
+            return Map.of();
         }
-        FieldDef field = schema.byKey().get(fieldKey);
-        if (field == null) {
-            return String.valueOf(value);
-        }
-        if (value instanceof String text) {
-            try {
-                Object parsed = FieldCodec.parse(field, text);
-                return FieldCodec.format(field, parsed);
-            } catch (RuntimeException e) {
-                return text;
+        Map<String, String> result = new LinkedHashMap<>();
+        map.forEach((key, item) -> {
+            if (key != null && item != null) {
+                result.put(String.valueOf(key), String.valueOf(item));
             }
+        });
+        return result;
+    }
+
+    /** Text of one stored value, {@code null} when it is absent. Never normalized. */
+    public static String textOrNull(Object value) {
+        if (value == null) {
+            return null;
         }
-        return FieldCodec.format(field, value);
+        String text = String.valueOf(value);
+        return text.isEmpty() ? null : text;
     }
 
     /** Returns the formula map for the trade fields stored in {@code formula_json}. */

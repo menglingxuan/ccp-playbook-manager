@@ -5,13 +5,8 @@ import { openCaseDrawer } from './case-drawer.js';
 const outputId = document.body.dataset.outputId;
 const state = { output: null, page: 1, size: 50, q: '', hasFormula: false, caseIds: [] };
 
-function debounce(fn, delay = 350) {
-  let timer = null;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
-}
+/** Shared debounce; the page keeps its own default delay. */
+const debounce = (fn, delay = 350) => ui.debounce(fn, delay);
 
 async function loadOutput() {
   try {
@@ -52,7 +47,7 @@ async function loadCases() {
           <td class="mono">${ui.escapeHtml(item.keyValue || '—')}</td>
           <td class="mono" style="font-size:11px">${preview}</td>
           <td class="num">${item.formulaCount}</td>
-          <td><button class="tool-btn small" data-open="${ui.escapeHtml(item.id)}">纵向查看</button></td>
+          <td><div class="row-actions">${ui.iconButton('eye', '纵向查看该用例', 'sm', `data-open="${ui.escapeHtml(item.id)}"`)}</div></td>
         </tr>`;
     });
     ui.setHtml('outputCaseRows', rows.length ? rows.join('')

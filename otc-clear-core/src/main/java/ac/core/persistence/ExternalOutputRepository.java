@@ -109,6 +109,25 @@ public class ExternalOutputRepository {
                 .param("tenantId", tenantId).param("id", id).update();
     }
 
+    /**
+     * Drops the batch reference of outputs whose imported batch is being purged.
+     *
+     * <p>The output record itself is history of an external run and stays; only the pointer to the batch
+     * that no longer exists is cleared, so no row keeps a dead id.
+     *
+     * @param tenantId tenant scope
+     * @param batchIds batches that disappear
+     * @return number of detached outputs
+     */
+    public int detachBatches(String tenantId, java.util.Collection<String> batchIds) {
+        if (batchIds == null || batchIds.isEmpty()) {
+            return 0;
+        }
+        return jdbc.sql("UPDATE external_output SET imported_batch_id = NULL"
+                + " WHERE tenant_id = :tenantId AND imported_batch_id IN (:batchIds)")
+                .param("tenantId", tenantId).param("batchIds", batchIds).update();
+    }
+
     private ExternalOutputRow map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         return new ExternalOutputRow(
                 rs.getString("id"),

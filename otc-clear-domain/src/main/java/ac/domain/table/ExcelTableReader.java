@@ -27,6 +27,10 @@ public final class ExcelTableReader {
     static {
         // Excel files produced by business users are highly compressible; the default guard rejects them.
         ZipSecureFile.setMinInflateRatio(0.01);
+        // a zip bomb must fail fast instead of filling the heap: one entry and the shared string table
+        // are capped well above any real workbook of the configured row limit
+        ZipSecureFile.setMaxEntrySize(256L * 1024 * 1024);
+        ZipSecureFile.setMaxTextSize(64L * 1024 * 1024);
     }
 
     public static final int DEFAULT_MAX_ROWS = 200_000;
@@ -62,6 +66,12 @@ public final class ExcelTableReader {
     }
 
     public static RawTable readSheet(Path file, int sheetIndex, int maxRows) {
+        return readSheet(file, sheetIndex, maxRows, TableLimits.DEFAULT);
+    }
+
+    /** Reads one sheet with explicit size guards. */
+    public static RawTable readSheet(Path file, int sheetIndex, int maxRows, TableLimits limits) {
+        TableLimits guards = limits == null ? TableLimits.DEFAULT : limits;
         try (Workbook workbook = open(file)) {
             if (sheetIndex < 0 || sheetIndex >= workbook.getNumberOfSheets()) {
                 throw new TableReadException("Sheet index " + sheetIndex + " does not exist");
@@ -76,11 +86,14 @@ public final class ExcelTableReader {
             }
 
             RawTable.Builder builder = RawTable.builder(sheet.getSheetName());
+            int rowNumber = 0;
             for (int rowIndex = firstRow; rowIndex <= lastRow; rowIndex++) {
+                rowNumber++;
                 Row row = sheet.getRow(rowIndex);
-                builder.addRow(convertRow(row));
+                guards.checkColumns(sheet.getSheetName(), rowNumber, row == null ? 0 : row.getLastCellNum());
+                builder.addRow(convertRow(row, sheet.getSheetName(), rowNumber, guards));
             }
-            return builder.build();
+            return builder.declaredRowCount(rowCount).build();
         } catch (IOException | RuntimeException e) {
             throw wrap(file, e);
         }
@@ -90,14 +103,68 @@ public final class ExcelTableReader {
         return readSheet(file, 0, maxRows);
     }
 
+    /**
+     * Reads the first rows of one sheet for a preview.
+     *
+     * <p>Unlike {@link #readSheet(Path, int, int, TableLimits)} a bigger sheet is not an error: only
+     * the first {@code keepRows} rows are converted and the real row count is reported through
+     * {@link RawTable#declaredRowCount()}.
+     */
+    public static RawTable readSheetLimited(Path file, int sheetIndex, int keepRows, TableLimits limits) {
+        return readSheetWindow(file, sheetIndex, 0, keepRows, limits);
+    }
+
+    /**
+     * Reads one window of a sheet: the first {@code skipRows} sheet rows are dropped, the next
+     * {@code keepRows} are returned.
+     *
+     * <p>Used by the wizard pager so it can walk the whole sheet while only one page is converted.
+     */
+    public static RawTable readSheetPage(Path file, int sheetIndex, int skipRows, int keepRows,
+            TableLimits limits) {
+        return readSheetWindow(file, sheetIndex, Math.max(skipRows, 0), keepRows, limits);
+    }
+
+    private static RawTable readSheetWindow(Path file, int sheetIndex, int skipRows, int keepRows,
+            TableLimits limits) {
+        TableLimits guards = limits == null ? TableLimits.DEFAULT : limits;
+        int keep = Math.max(keepRows, 1);
+        try (Workbook workbook = open(file)) {
+            if (sheetIndex < 0 || sheetIndex >= workbook.getNumberOfSheets()) {
+                throw new TableReadException("Sheet index " + sheetIndex + " does not exist");
+            }
+            Sheet sheet = workbook.getSheetAt(sheetIndex);
+            int firstRow = sheet.getFirstRowNum();
+            int lastRow = sheet.getLastRowNum();
+            int rowCount = lastRow - firstRow + 1;
+            RawTable.Builder builder = RawTable.builder(sheet.getSheetName());
+            int rowNumber = 0;
+            for (int rowIndex = firstRow; rowIndex <= lastRow; rowIndex++) {
+                rowNumber++;
+                if (rowNumber <= skipRows) {
+                    continue;
+                }
+                if (rowNumber > skipRows + keep) {
+                    break;
+                }
+                Row row = sheet.getRow(rowIndex);
+                guards.checkColumns(sheet.getSheetName(), rowNumber, row == null ? 0 : row.getLastCellNum());
+                builder.addRow(convertRow(row, sheet.getSheetName(), rowNumber, guards));
+            }
+            return builder.declaredRowCount(Math.max(rowCount, rowNumber)).build();
+        } catch (IOException | RuntimeException e) {
+            throw wrap(file, e);
+        }
+    }
+
     private static Workbook open(Path file) throws IOException {
         if (file == null || !Files.isRegularFile(file)) {
-            throw new TableReadException("File does not exist: " + file);
+            throw new TableReadException("The source file is no longer available");
         }
         return WorkbookFactory.create(file.toFile(), null, true);
     }
 
-    private static RawRow convertRow(Row row) {
+    private static RawRow convertRow(Row row, String sheetName, int rowNumber, TableLimits limits) {
         if (row == null) {
             return RawRow.plain(new String[0]);
         }
@@ -138,6 +205,9 @@ public final class ExcelTableReader {
             } else {
                 texts[column] = rawText(cell, cell.getCellType());
             }
+        }
+        for (int column = 0; column < columns; column++) {
+            limits.checkCell(sheetName, rowNumber, column + 1, texts[column]);
         }
         return new RawRow(texts, formulas, errors);
     }

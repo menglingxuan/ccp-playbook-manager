@@ -20,14 +20,15 @@ public final class ViewMapper {
         view.put("id", row.id());
         view.put("kind", row.kind());
         view.put("status", row.status());
-        view.put("name", row.name());
-        view.put("sourceName", row.sourceName());
+        view.put("name", row.name());        view.put("sourceName", row.sourceName());
         view.put("sourceSha256", row.sourceSha256());
+        view.put("sourceMd5", row.sourceMd5());
         view.put("sheetCount", row.sheetCount());
         view.put("batchCount", row.batchCount());
         view.put("totalRows", row.totalRows());
         view.put("invalidRows", row.invalidRows());
         view.put("message", row.message());
+        view.put("note", row.note());
         view.put("createdAt", TimeProvider.display(row.createdAt()));
         view.put("finishedAt", TimeProvider.display(row.finishedAt()));
         view.put("durationSeconds", duration(row.startedAt(), row.finishedAt()));
@@ -38,6 +39,7 @@ public final class ViewMapper {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("id", row.id());
         view.put("taskId", row.taskId());
+        view.put("name", row.name());
         view.put("kind", row.kind());
         view.put("parentBatchId", row.parentBatchId());
         view.put("productCode", row.productCode());
@@ -70,6 +72,7 @@ public final class ViewMapper {
         view.put("fileSize", row.fileSize());
         view.put("status", row.status());
         view.put("message", row.message());
+        view.put("note", row.note());
         view.put("createdAt", TimeProvider.display(row.createdAt()));
         return view;
     }

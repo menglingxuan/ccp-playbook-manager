@@ -75,9 +75,29 @@ public class TaskController {
         }
     }
 
+    /**
+     * Task counts per status of the tasks matching the current list filters.
+     *
+     * <p>The response ignores {@code status} on purpose: the cards show how many tasks each status has
+     * under the active search, product and date filters, and clicking a card applies exactly that
+     * filter.
+     *
+     * @param kind    task kind, {@code null} for all
+     * @param product base product code, {@code null} for all
+     * @param query   free text search, {@code null} for none
+     * @param from    earliest creation date, {@code null} for no lower bound
+     * @param to      latest creation date, {@code null} for no upper bound
+     * @return status to count
+     */
     @GetMapping("/summary")
-    public Map<String, Integer> summary() {
-        return taskService.statusSummary(tenantProvider.tenantId());
+    public Map<String, Integer> summary(@RequestParam(required = false) String kind,
+            @RequestParam(required = false) String product,
+            @RequestParam(required = false, name = "q") String query,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        TaskFilter filter = new TaskFilter(kind, null, product, query, null, parseDate(from),
+                parseDate(to), PageQuery.of(1, 1));
+        return taskService.statusSummary(tenantProvider.tenantId(), filter);
     }
 
     /** Renames a task; duplicate names are rejected with 409 so the list stays identifiable. */
@@ -85,6 +105,16 @@ public class TaskController {
     public Map<String, Object> rename(@PathVariable String id, @RequestBody Map<String, String> body) {
         taskService.rename(tenantProvider.tenantId(), id, body.get("name"));
         return Map.of("id", id, "name", body.get("name").trim());
+    }
+
+    /** Sets or clears the free text remark of a task. */
+    @PatchMapping("/{id}/note")
+    public Map<String, Object> note(@PathVariable String id, @RequestBody Map<String, String> body) {
+        String note = taskService.updateNote(tenantProvider.tenantId(), id, body.get("note"));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", id);
+        result.put("note", note);
+        return result;
     }
 
     @GetMapping("/{id}")

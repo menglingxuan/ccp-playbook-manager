@@ -61,6 +61,14 @@ public final class ApiClient {
         return send(builder);
     }
 
+    public Response put(String path, String jsonBody) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(jsonBody == null ? "{}" : jsonBody,
+                        StandardCharsets.UTF_8));
+        return send(builder);
+    }
+
     public Response delete(String path) {
         return send(HttpRequest.newBuilder(URI.create(baseUrl + path)).DELETE());
     }

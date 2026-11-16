@@ -169,7 +169,7 @@ class RowConverterTest {
         // stored verbatim so the workbook can be rebuilt for recalculation
         assertThat(row.formulas()).containsEntry("notional", "=D2*E2");
         // hashing still uses the masked text, so the id stays stable across rows
-        String normalizedId = RecordIdGenerator.businessId(SCHEMA, row.data(),
+        String normalizedId = RecordIdGenerator.businessId(SCHEMA, row.texts(),
                 Map.of("notional", "=D#*E#"), 32);
         assertThat(row.businessRecordId()).isEqualTo(normalizedId);
     }

@@ -24,7 +24,7 @@ public final class ProductViews {
     /** Base product field. */
     public record BaseFieldView(String id, String fieldKey, String header, String displayName,
             List<String> aliases, String valueTypeCode, String valueTypeLabel, String roleCode, String roleLabel,
-            List<String> tags, boolean required, int sortOrder, String remark) {
+            List<String> tags, boolean required, int sortOrder, String remark, String validationExpr) {
 
         public BaseFieldView {
             aliases = List.copyOf(aliases);
@@ -47,7 +47,7 @@ public final class ProductViews {
     public record ProductFieldView(String id, String baseFieldId, String fieldKey, String header,
             String displayName, List<String> aliases, String valueTypeCode, String valueTypeLabel,
             String roleCode, String roleLabel, List<String> tags, boolean required, boolean requiredFromBase,
-            int sortOrder, int baseSortOrder, String remark) {
+            int sortOrder, int baseSortOrder, String remark, String validationExpr) {
 
         public ProductFieldView {
             aliases = List.copyOf(aliases);

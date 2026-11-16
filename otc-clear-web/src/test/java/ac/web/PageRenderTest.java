@@ -14,7 +14,7 @@ class PageRenderTest extends AbstractIntegrationTest {
         for (String path : paths) {
             var response = api.get(path);
             assertThat(response.status()).as(path + " -> " + response.body()).isEqualTo(200);
-            assertThat(response.body()).contains("OTC Clear 测试数据管理平台");
+            assertThat(response.body()).contains("Tabular 结构化文本数据管理工具");
         }
     }
 
@@ -22,6 +22,15 @@ class PageRenderTest extends AbstractIntegrationTest {
     void auditLinkIsRenderedOnEveryPage() {
         for (String path : new String[] {"/", "/meta", "/resources", "/about", "/audit"}) {
             assertThat(api.get(path).body()).as(path).contains("href=\"/audit\"");
+        }
+    }
+
+    @Test
+    void tenantBadgeIsHiddenByDefault() {
+        // the tenant stays private unless the deployment asks for it
+        assertThat(api.get("/api/context").json().get("showTenant").asBoolean()).isFalse();
+        for (String path : new String[] {"/", "/meta", "/resources", "/about"}) {
+            assertThat(api.get(path).body()).as(path).doesNotContain("ctxBadge");
         }
     }
 

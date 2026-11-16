@@ -1,8 +1,9 @@
 import { del, get, patch, query } from '../api.js';
 import * as ui from '../ui.js';
+import { openValidationPanel } from '../validation-panel.js';
 
 /*
- * Batch console: dock (recent/pinned batches) -> drawer (batch management) -> sidebar (cases) ->
+ * Batch console: dock (recent batches) -> drawer (batch management) -> sidebar (cases) ->
  * main table (field rows of the selected case). The task -> batch detail page stays untouched.
  */
 
@@ -22,7 +23,6 @@ const state = {
     kind: '',
     tag: '',
     favorite: false,
-    pinned: false,
     from: '',
     to: '',
     includeDeleted: false,
@@ -45,7 +45,6 @@ const state = {
     total: 0,
     summary: { total: 0, withFormula: 0 },
     loading: false,
-    collapsed: false,
   },
   detail: {
     caseId: null,
@@ -59,9 +58,12 @@ const state = {
 const TYPE_LABEL = {
   TEXT: '文本',
   DATE: '日期',
+  TIME: '时间',
+  DATETIME: '日期时间',
   DECIMAL: '数值',
   INTEGER: '整数',
   BOOLEAN: '布尔',
+  ENUM: '枚举',
 };
 
 const KIND_LABEL = {
@@ -89,7 +91,6 @@ const KEY_HELP = [
   ['F', '收藏夹'],
   ['J / K', '下一条 / 上一条用例'],
   ['Enter', '进入批次详情页'],
-  ['Space', '收藏当前批次'],
   ['L', '锁定字段筛选'],
   ['Esc', '关闭面板 / 清空筛选'],
 ];
@@ -98,13 +99,8 @@ function escapeHtml(value) {
   return ui.escapeHtml(value);
 }
 
-function debounce(fn, delay = 280) {
-  let timer = null;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
-}
+/** Shared debounce; the page keeps its own default delay. */
+const debounce = (fn, delay = 280) => ui.debounce(fn, delay);
 
 // ------------------------------------------------------------------ preferences
 
@@ -126,7 +122,6 @@ function loadPrefs() {
     if (saved.panelWidth) {
       state.panel.width = Math.max(300, Math.min(680, Number(saved.panelWidth) || 380));
     }
-    state.cases.collapsed = saved.collapsed === true;
     state.detail.locked = saved.locked === true;
   } catch (ignored) {
     // a broken preference must never block the page
@@ -141,7 +136,6 @@ function savePrefs() {
       batchId: state.cases.batchId,
       side: state.panel.side,
       panelWidth: state.panel.width,
-      collapsed: state.cases.collapsed,
       locked: state.detail.locked,
     }));
   } catch (ignored) {
@@ -159,7 +153,6 @@ function batchQuery(extra = {}) {
     kind: p.kind,
     tag: p.tag,
     favorite: p.favorite ? 'true' : '',
-    pinned: p.pinned ? 'true' : '',
     from: p.from,
     to: p.to,
     includeDeleted: p.includeDeleted ? 'true' : '',
@@ -201,11 +194,28 @@ async function loadBatches() {
   renderFavorites();
 }
 
-async function loadCases(reset = true) {
+/**
+ * Loads the case page of the selected batch.
+ *
+ * @param reset  {@code true} to reload from the first page
+ * @param quiet  {@code true} to suppress the generic error toast, so the caller can report the
+ *               failure in its own words (used when a batch is loaded or switched)
+ * @returns {{ok: boolean, error: Error|null, skipped: boolean}}
+ */
+async function loadCases(reset = true, quiet = false) {
   const cases = state.cases;
-  if (!cases.batchId || cases.loading) {
-    return;
+  if (!cases.batchId) {
+    return { ok: false, error: null, skipped: true };
   }
+  if (cases.loading) {
+    // switching the batch while another one is loading used to be dropped silently; remember the
+    // request and run it as soon as the current one finishes
+    cases.pending = { reset, quiet };
+    return { ok: false, error: null, skipped: true };
+  }
+  const requestedBatch = cases.batchId;
+  let rerun = null;
+  let outcome = { ok: false, error: null, skipped: false };
   cases.loading = true;
   try {
     const page = reset ? 1 : cases.page + 1;
@@ -216,6 +226,7 @@ async function loadCases(reset = true) {
     cases.items = reset ? result.items : cases.items.concat(result.items);
     cases.total = result.total;
     cases.summary = result.summary || cases.summary;
+    outcome = { ok: true, error: null, skipped: false };
     if (reset) {
       const keep = cases.items.some((item) => item.id === state.detail.caseId);
       if (!keep) {
@@ -224,10 +235,14 @@ async function loadCases(reset = true) {
       }
     }
   } catch (error) {
-    ui.showError(error);
+    outcome = { ok: false, error, skipped: false };
+    if (!quiet) {
+      ui.showError(error);
+    }
     if (reset) {
       cases.items = [];
       cases.total = 0;
+      cases.summary = null;
       if (error.status === 404) {
         // the remembered batch was deleted meanwhile: fall back to the newest one
         cases.batchId = null;
@@ -238,6 +253,16 @@ async function loadCases(reset = true) {
     }
   } finally {
     cases.loading = false;
+    const pending = cases.pending;
+    cases.pending = null;
+    if (pending && cases.batchId && cases.batchId !== requestedBatch) {
+      rerun = pending;
+    }
+  }
+  if (rerun) {
+    // a batch switch arrived while this load was running: serve the newest target now
+    void loadCases(rerun.reset, rerun.quiet);
+    return outcome;
   }
   renderSidebar();
   if (!cases.batchId) {
@@ -245,7 +270,7 @@ async function loadCases(reset = true) {
       || (state.panel.dock[0] && state.panel.dock[0].id);
     if (fallback) {
       await selectBatch(fallback);
-      return;
+      return outcome;
     }
   }
   if (!state.detail.vertical && state.detail.caseId) {
@@ -253,6 +278,7 @@ async function loadCases(reset = true) {
   } else {
     renderDetail();
   }
+  return outcome;
 }
 
 async function loadVertical() {
@@ -291,9 +317,6 @@ function renderDock() {
       + (batch.note ? ` · ${batch.note}` : '');
     const { month, day } = shortLabel(batch);
     const marks = [];
-    if (batch.pinned) {
-      marks.push('📌');
-    }
     if (batch.favorite) {
       marks.push('★');
     }
@@ -413,9 +436,6 @@ function activeFilterChips() {
   if (p.favorite) {
     chips.push({ key: 'favorite', label: '仅收藏' });
   }
-  if (p.pinned) {
-    chips.push({ key: 'pinned', label: '仅置顶' });
-  }
   if (p.includeDeleted) {
     chips.push({ key: 'includeDeleted', label: '含已删除' });
   }
@@ -436,30 +456,30 @@ function batchItemHtml(batch) {
   const note = batch.note
     ? `<div class="bp-note" title="${escapeHtml(batch.note)}">${escapeHtml(batch.note)}</div>`
     : '';
+  // three rows: name + kind + base product, time + product name, status icon + tags + row count
+  const closing = `<span class="bp-count" title="已导入行数 / 无效行">${batch.totalRows} 行${
+    batch.invalidRows ? ` · ${batch.invalidRows} 无效` : ''}</span>`;
   return `
     <div class="bp-item${active ? ' active' : ''}" data-batch="${escapeHtml(batch.id)}">
       <div class="bp-item-head">
         <button class="bp-open" data-open="${escapeHtml(batch.id)}"
-                title="加载该批次的用例与字段">${escapeHtml(batch.sourceFilename)}</button>
+                title="加载该批次的用例与字段（源文件 ${escapeHtml(batch.sourceFilename)}）">${escapeHtml(batch.name || batch.sourceFilename)}</button>
         <span class="bp-kind">${escapeHtml(KIND_LABEL[batch.kind] || batch.kind)}</span>
-        <span class="bp-product">${escapeHtml(batch.productCode)}</span>
-        ${ui.statusBadge(batch.status)}
+        <span class="bp-product" title="基产品">${escapeHtml(batch.baseProductCode || batch.productCode)}</span>
+        <div class="bp-actions">
+          <button class="bp-act${batch.favorite ? ' on' : ''}" data-favorite="${escapeHtml(batch.id)}"
+                  title="${batch.favorite ? '取消收藏' : '收藏'}">★</button>
+          <button class="bp-act" data-meta="${escapeHtml(batch.id)}" title="编辑备注与标签">✎</button>
+          <a class="bp-act" href="/batches/${encodeURIComponent(batch.id)}" title="进入批次详情页">↗</a>
+          <button class="bp-act danger" data-delete="${escapeHtml(batch.id)}" title="删除批次">🗑</button>
+        </div>
       </div>
       <div class="bp-meta">
-        <span title="已导入行数 / 无效行">${batch.totalRows} 行${batch.invalidRows ? ` · ${batch.invalidRows} 无效` : ''}</span>
-        <span class="mono">${escapeHtml(batch.createdAt)}</span>
-        ${batch.sheetName ? `<span class="bp-sheet" title="Sheet">${escapeHtml(batch.sheetName)}</span>` : ''}
+        <span class="mono" title="创建时间">${escapeHtml(batch.createdAt)}</span>
+        <span class="bp-name" title="产品${batch.sheetName ? ` · Sheet ${escapeHtml(batch.sheetName)}` : ''}">${
+          escapeHtml(batch.productName || batch.productCode)}</span>
       </div>
-      ${tags || note ? `<div class="bp-tags">${tags}${note}</div>` : ''}
-      <div class="bp-actions">
-        <button class="bp-act${batch.favorite ? ' on' : ''}" data-favorite="${escapeHtml(batch.id)}"
-                title="${batch.favorite ? '取消收藏' : '收藏'}">★</button>
-        <button class="bp-act${batch.pinned ? ' on' : ''}" data-pin="${escapeHtml(batch.id)}"
-                title="${batch.pinned ? '取消置顶' : '置顶'}">📌</button>
-        <button class="bp-act" data-meta="${escapeHtml(batch.id)}" title="编辑备注与标签">✎</button>
-        <a class="bp-act" href="/batches/${encodeURIComponent(batch.id)}" title="进入批次详情页">↗</a>
-        <button class="bp-act danger" data-delete="${escapeHtml(batch.id)}" title="删除批次">🗑</button>
-      </div>
+      <div class="bp-tags">${ui.statusTag(batch.status)}${tags}${note}${closing}</div>
     </div>`;
 }
 
@@ -495,7 +515,7 @@ function clearFilter(key) {
   if (key === 'range') {
     p.from = '';
     p.to = '';
-  } else if (key === 'favorite' || key === 'pinned' || key === 'includeDeleted') {
+  } else if (key === 'favorite' || key === 'includeDeleted') {
     p[key] = false;
   } else {
     p[key] = '';
@@ -547,7 +567,7 @@ function renderPanel() {
     </div>
     <div class="bp-resize" id="bpResize" title="拖动调整宽度"></div>
     <div class="bp-controls">
-      <input type="search" id="bpSearch" placeholder="搜索文件名 / Sheet / 备注 / 标签 / 产品…"
+      <input type="search" id="bpSearch" placeholder="搜索批次名称 / 文件名 / Sheet / 批次描述 / 标签 / 产品…"
              value="${escapeHtml(p.q)}">
       <div class="bp-row">
         <select id="bpProduct" aria-label="产品">${productOptions}</select>
@@ -567,8 +587,6 @@ function renderPanel() {
       <div class="bp-toggles">
         <button class="bp-toggle${p.favorite ? ' on' : ''}" id="bpFavorite"
                 title="只看收藏">★ 收藏 (${facets?.favorite ?? 0})</button>
-        <button class="bp-toggle${p.pinned ? ' on' : ''}" id="bpPinned"
-                title="只看置顶">📌 置顶 (${facets?.pinned ?? 0})</button>
         <button class="bp-toggle${p.includeDeleted ? ' on' : ''}" id="bpDeleted"
                 title="包含软删除的批次">已删除</button>
       </div>
@@ -593,10 +611,6 @@ function renderPanel() {
   bindChange('bpTo', (value) => { p.to = value; });
   ui.byId('bpFavorite').addEventListener('click', () => {
     p.favorite = !p.favorite;
-    reloadList();
-  });
-  ui.byId('bpPinned').addEventListener('click', () => {
-    p.pinned = !p.pinned;
     reloadList();
   });
   ui.byId('bpDeleted').addEventListener('click', () => {
@@ -624,10 +638,7 @@ function bindBatchRows(root) {
     });
   });
   root.querySelectorAll('[data-favorite]').forEach((node) => {
-    node.addEventListener('click', () => toggleFlag(node.dataset.favorite, 'favorite'));
-  });
-  root.querySelectorAll('[data-pin]').forEach((node) => {
-    node.addEventListener('click', () => toggleFlag(node.dataset.pin, 'pinned'));
+    node.addEventListener('click', () => toggleFavorite(node.dataset.favorite));
   });
   root.querySelectorAll('[data-meta]').forEach((node) => {
     node.addEventListener('click', () => openMetaEditor(node.dataset.meta));
@@ -648,18 +659,17 @@ function findBatch(batchId) {
     || state.panel.items.find((item) => item.id === batchId);
 }
 
-async function toggleFlag(batchId, field) {
+/** Toggles the favorite flag of one batch. */
+async function toggleFavorite(batchId) {
   const batch = findBatch(batchId);
   if (!batch) {
     return;
   }
   try {
     const updated = await patch(`/api/batches/${encodeURIComponent(batchId)}/meta`,
-      { [field]: !batch[field] });
-    Object.assign(batch, { favorite: updated.favorite, pinned: updated.pinned, tags: updated.tags });
-    ui.toast(field === 'favorite'
-      ? (updated.favorite ? '已收藏' : '已取消收藏')
-      : (updated.pinned ? '已置顶' : '已取消置顶'), 'ok');
+      { favorite: !batch.favorite });
+    Object.assign(batch, { favorite: updated.favorite, tags: updated.tags });
+    ui.toast(updated.favorite ? '已收藏' : '已取消收藏', 'ok');
     await loadDock();
     await reloadList();
     renderDetail();
@@ -668,28 +678,152 @@ async function toggleFlag(batchId, field) {
   }
 }
 
-function openMetaEditor(batchId) {
+/** Predefined tags offered by the meta sets, empty when the request fails. */
+async function predefinedTags() {
+  try {
+    return await get('/api/meta/tags');
+  } catch (error) {
+    return [];
+  }
+}
+
+/**
+ * Tag editor of the batch dialog: chips with their own remove button plus an add row, so tags are
+ * edited one by one instead of as a comma separated string.
+ *
+ * @param root dialog root holding the tag list, input and suggestions
+ * @param initial tags of the batch
+ * @param presets predefined tags offered as suggestions
+ * @returns the live draft list of tags
+ */
+function bindTagEditor(root, initial, presets) {
+  const draft = (initial || []).slice();
+  const listEl = root.querySelector('#metaTagList');
+  const inputEl = root.querySelector('#metaTagInput');
+  const suggestEl = root.querySelector('#metaTagSuggest');
+
+  const render = () => {
+    listEl.innerHTML = draft.length
+      ? draft.map((tag, index) => `<span class="tag-pill">${escapeHtml(tag)}
+          <button type="button" class="tag-pill-del" data-tag-remove="${index}"
+            title="移除" aria-label="移除 ${escapeHtml(tag)}">✕</button></span>`).join('')
+      : '<span class="tag-empty">还没有标签，可添加自由标签或点选常用标签</span>';
+    if (suggestEl) {
+      suggestEl.querySelectorAll('[data-tag-suggest]').forEach((button) => {
+        const on = draft.some((tag) => tag.toLowerCase() === button.dataset.tagSuggest.toLowerCase());
+        button.classList.toggle('on', on);
+        button.textContent = `${on ? '✓' : '+'} ${button.dataset.tagSuggest}`;
+      });
+    }
+  };
+
+  const add = (value) => {
+    const tag = String(value || '').trim().slice(0, 32);
+    if (!tag) {
+      return;
+    }
+    if (tag.includes(',')) {
+      ui.toast('单个标签不能包含逗号', 'bad');
+      return;
+    }
+    if (draft.some((item) => item.toLowerCase() === tag.toLowerCase())) {
+      ui.toast(`标签「${tag}」已存在`, 'bad');
+      inputEl.select();
+      return;
+    }
+    if (draft.length >= 10) {
+      ui.toast('最多 10 个标签', 'bad');
+      inputEl.select();
+      return;
+    }
+    draft.push(tag);
+    inputEl.value = '';
+    render();
+  };
+
+  const toggle = (tag) => {
+    const index = draft.findIndex((item) => item.toLowerCase() === tag.toLowerCase());
+    if (index >= 0) {
+      draft.splice(index, 1);
+      render();
+    } else {
+      add(tag);
+    }
+  };
+
+  root.querySelector('#metaTagAdd').addEventListener('click', () => add(inputEl.value));
+  inputEl.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      add(inputEl.value);
+    }
+  });
+  listEl.addEventListener('click', (event) => {
+    const remove = event.target.closest('[data-tag-remove]');
+    if (!remove) {
+      return;
+    }
+    draft.splice(Number(remove.dataset.tagRemove), 1);
+    render();
+  });
+  if (suggestEl) {
+    suggestEl.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-tag-suggest]');
+      if (button) {
+        toggle(button.dataset.tagSuggest);
+      }
+    });
+  }
+  render();
+  return draft;
+}
+
+async function openMetaEditor(batchId) {
   const batch = findBatch(batchId) || { id: batchId, note: '', tags: [] };
+  const presets = await predefinedTags();
+  const suggestHtml = presets.length
+    ? `<div class="tag-suggest" id="metaTagSuggest">${presets.map((tag) => `<button type="button"
+        data-tag-suggest="${escapeHtml(tag)}">+ ${escapeHtml(tag)}</button>`).join('')}</div>`
+    : '';
   const modal = ui.openModal('编辑批次信息', `
-    <label class="field"><span>备注（≤500 字符）</span>
-      <textarea id="metaNote" rows="3" maxlength="500">${escapeHtml(batch.note || '')}</textarea>
-    </label>
-    <label class="field"><span>标签（逗号分隔，≤10 个，每个 ≤32 字符）</span>
-      <input type="text" id="metaTags" value="${escapeHtml((batch.tags || []).join(', '))}">
-    </label>`, `
+    <div class="be-field">
+      <label class="be-label" for="metaName">批次名称</label>
+      <input id="metaName" type="text" maxlength="256" value="${escapeHtml(batch.name || '')}"
+        placeholder="例如：IRS 回归批次">
+    </div>
+    <div class="be-field">
+      <label class="be-label" for="metaNote">批次描述</label>
+      <textarea id="metaNote" rows="3" maxlength="2000"
+        placeholder="记录批次用途、来源或注意事项，可多行">${escapeHtml(batch.note || '')}</textarea>
+    </div>
+    <div class="be-field">
+      <label class="be-label" for="metaTagInput">标签</label>
+      <div class="tag-list" id="metaTagList"></div>
+      <div class="tag-add-row">
+        <input id="metaTagInput" type="text" maxlength="32" placeholder="输入标签后按回车添加">
+        <button class="tool-btn small" type="button" id="metaTagAdd">添加</button>
+      </div>
+      ${suggestHtml}
+    </div>`, `
     <button class="tool-btn" data-act="cancel">取消</button>
     <button class="tool-btn primary" data-act="save">保存</button>`);
+  const tags = bindTagEditor(modal.root, batch.tags, presets);
   modal.root.querySelector('[data-act="cancel"]').addEventListener('click', () => modal.close());
   modal.root.querySelector('[data-act="save"]').addEventListener('click', async () => {
+    const name = modal.root.querySelector('#metaName').value.trim();
     const note = modal.root.querySelector('#metaNote').value;
-    const tags = modal.root.querySelector('#metaTags').value
-      .split(',').map((tag) => tag.trim()).filter(Boolean);
+    if (!name) {
+      ui.toast('批次名称不能为空', 'bad');
+      modal.root.querySelector('#metaName').focus();
+      return;
+    }
     try {
-      await patch(`/api/batches/${encodeURIComponent(batchId)}/meta`, { note, tags });
+      await patch(`/api/batches/${encodeURIComponent(batchId)}/meta`, { name, note, tags });
       modal.close();
       ui.toast('批次信息已更新', 'ok');
       await loadDock();
       await reloadList();
+      renderDetail();
     } catch (error) {
       ui.showError(error);
     }
@@ -698,8 +832,8 @@ function openMetaEditor(batchId) {
 
 async function removeBatch(batchId) {
   const batch = findBatch(batchId);
-  const label = batch ? batch.sourceFilename : batchId;
-  if (!window.confirm(`删除批次「${label}」？其用例会一并软删除。`)) {
+  const label = batch ? (batch.name || batch.sourceFilename) : batchId;
+  if (!window.confirm(`删除批次「${label}」？其用例会一并删除，且无法恢复。`)) {
     return;
   }
   try {
@@ -754,11 +888,6 @@ function renderSidebar() {
   if (!side) {
     return;
   }
-  side.classList.toggle('collapsed', cases.collapsed);
-  const expand = ui.byId('sideExpand');
-  if (expand) {
-    expand.hidden = !cases.collapsed;
-  }
   ui.setHtml('caseCount', String(cases.total));
   const summary = cases.summary || { total: 0, withFormula: 0 };
   ui.setHtml('caseSummary', cases.batchId
@@ -767,11 +896,24 @@ function renderSidebar() {
     : '<span>未选择批次</span>');
   const nav = ui.byId('caseNav');
   if (nav) {
+    const batchId = cases.batchId;
     nav.innerHTML = `
       <button class="side-btn" id="casePrev" title="上一条（K）" aria-label="上一条">↑</button>
-      <button class="side-btn" id="caseNext" title="下一条（J）" aria-label="下一条">↓</button>`;
+      <button class="side-btn" id="caseNext" title="下一条（J）" aria-label="下一条">↓</button>
+      <button class="side-btn" id="caseValidate" title="批量校验当前批次的字段值"
+        aria-label="批量校验"${batchId ? '' : ' disabled'}>${ui.icon('check', 14)}</button>`;
     ui.byId('casePrev').addEventListener('click', () => moveCase(-1));
     ui.byId('caseNext').addEventListener('click', () => moveCase(1));
+    ui.byId('caseValidate').addEventListener('click', () => {
+      if (!batchId) {
+        return;
+      }
+      const batch = findBatch(batchId);
+      openValidationPanel(`/api/batches/${encodeURIComponent(batchId)}/validation`, {
+        title: '批次字段值校验',
+        subtitle: `批次 ${(batch && batch.name) || batchId} · 产品 ${(batch && batch.productCode) || '—'}`,
+      });
+    });
   }
   const rows = cases.items.map((item) => {
     const active = item.id === state.detail.caseId;
@@ -822,16 +964,6 @@ function moveCase(delta) {
 }
 
 function bindSidebar() {
-  ui.byId('sideCollapse').addEventListener('click', () => {
-    state.cases.collapsed = true;
-    savePrefs();
-    renderSidebar();
-  });
-  ui.byId('sideExpand').addEventListener('click', () => {
-    state.cases.collapsed = false;
-    savePrefs();
-    renderSidebar();
-  });
   ui.byId('caseSearch').addEventListener('input', debounce((event) => {
     state.cases.q = event.target.value;
     loadCases(true);
@@ -855,6 +987,18 @@ function bindSidebar() {
 
 // ------------------------------------------------------------------ selection
 
+/** Reports the outcome of a batch load or switch. */
+function notifyBatchLoaded(outcome) {
+  if (outcome.skipped) {
+    return;
+  }
+  if (!outcome.ok) {
+    ui.toast('批次加载失败', 'error');
+    return;
+  }
+  ui.toast('批次加载成功', 'ok');
+}
+
 async function selectBatch(batchId, options = {}) {
   if (!batchId) {
     return;
@@ -869,7 +1013,8 @@ async function selectBatch(batchId, options = {}) {
   renderPanel();
   renderDock();
   renderSidebar();
-  await loadCases(true);
+  const outcome = await loadCases(true, true);
+  notifyBatchLoaded(outcome);
   if (options.caseId) {
     await selectCase(options.caseId);
   }
@@ -1016,16 +1161,18 @@ function renderDetail() {
       ${row.keyValue ? `<span class="dh-key mono" title="唯一字段">${escapeHtml(row.keyValue)}</span>` : ''}
       <span class="dh-chip">#${row.rowNo}</span>
       ${row.productCode ? `<span class="dh-chip">${escapeHtml(row.productCode)}</span>` : ''}
-      ${batch ? `<span class="dh-file" title="${escapeHtml(batch.sourceFilename)}">${escapeHtml(batch.sourceFilename)}</span>` : ''}
+      ${batch ? `<span class="dh-file" title="源文件 ${escapeHtml(batch.sourceFilename)}">${escapeHtml(batch.name || batch.sourceFilename)}</span>` : ''}
     </div>
     <div class="dh-actions">
       <span class="dh-nav">
-        <button class="tool-btn small" id="detailPrev" title="上一条（K）"${index <= 0 ? ' disabled' : ''}>↑</button>
+        <button class="tool-btn small" id="detailPrev" title="上一条（K）"${index <= 0 ? ' disabled' : ''}>←</button>
+        <span class="dh-index" title="当前第 ${index + 1} 条 / 共 ${state.cases.total} 条">${
+          index + 1} / ${state.cases.total}</span>
         <button class="tool-btn small" id="detailNext" title="下一条（J）"
-                ${index >= state.cases.items.length - 1 && state.cases.items.length >= state.cases.total ? ' disabled' : ''}>↓</button>
+                ${index >= state.cases.items.length - 1 && state.cases.items.length >= state.cases.total ? ' disabled' : ''}>→</button>
       </span>
-      ${batch ? `<button class="tool-btn small" id="detailFavorite" title="收藏当前批次（Space）">★</button>
-        <a class="tool-btn small" href="/batches/${encodeURIComponent(batch.id)}" title="进入批次详情页（Enter）">批次详情</a>` : ''}
+      ${batch ? `<a class="tool-btn small" href="/batches/${encodeURIComponent(batch.id)}" title="进入批次详情页（Enter）">批次详情</a>
+      <button class="tool-btn small" id="detailValidateBatch" title="批量校验该批次的字段值">校验</button>` : ''}
     </div>`;
   const prev = ui.byId('detailPrev');
   const next = ui.byId('detailNext');
@@ -1035,9 +1182,14 @@ function renderDetail() {
   if (next) {
     next.addEventListener('click', () => moveCase(1));
   }
-  const favorite = ui.byId('detailFavorite');
-  if (favorite) {
-    favorite.addEventListener('click', () => toggleFlag(batch.id, 'favorite'));
+  const validateBtn = ui.byId('detailValidateBatch');
+  if (validateBtn) {
+    validateBtn.addEventListener('click', () => {
+      openValidationPanel(`/api/batches/${encodeURIComponent(batch.id)}/validation`, {
+        title: '批次字段值校验',
+        subtitle: `批次 ${batch.name || batch.id} · 产品 ${batch.productCode || '—'}`,
+      });
+    });
   }
 
   const types = [...new Set(fieldRows().map((item) => item.type).filter(Boolean))];
@@ -1169,7 +1321,7 @@ async function executeSearch(modal, expression) {
     const batches = (result.batches || []).map((hit) => `
       <button class="gs-item" data-gs-batch="${escapeHtml(hit.batchId)}">
         <span class="gs-kind">批次</span>
-        <span class="gs-title">${escapeHtml(hit.sourceFilename)}</span>
+        <span class="gs-title">${escapeHtml(hit.name || hit.sourceFilename)}</span>
         <span class="gs-meta">${escapeHtml(hit.productCode)} · ${escapeHtml(hit.createdAt)}${
           hit.tags && hit.tags.length ? ' · ' + escapeHtml(hit.tags.join(', ')) : ''}</span>
       </button>`).join('');
@@ -1276,12 +1428,6 @@ function bindKeys() {
       case 'L':
         event.preventDefault();
         toggleLock();
-        break;
-      case ' ':
-        if (state.cases.batchId) {
-          event.preventDefault();
-          toggleFlag(state.cases.batchId, 'favorite');
-        }
         break;
       case 'Enter':
         if (state.cases.batchId) {

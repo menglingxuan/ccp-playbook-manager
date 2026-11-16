@@ -19,10 +19,8 @@
     </div>
   </div>
 
-  <section class="summary" id="batchSummary"></section>
-
   <div class="toolbar">
-    <input type="search" id="caseSearch" placeholder="搜索字段值 / Trade ID / 备注…">
+    <input type="search" id="caseSearch" placeholder="搜索字段值 / Trade ID / 备注…" aria-label="搜索字段值 / Trade ID / 备注…">
     <label class="muted" style="display:flex;gap:6px;align-items:center;font-size:12px">
       <input type="checkbox" id="onlyFormula"> 仅含公式
     </label>
@@ -32,7 +30,10 @@
       <option value="100">100 / 页</option>
     </select>
     <div class="spacer"></div>
+    <span class="muted" id="dupInfo" hidden></span>
     <span class="muted" id="selectionInfo">未选择</span>
+    <button class="tool-btn" id="bulkFieldBtn">批量更新字段</button>
+    <button class="tool-btn" id="validateBatchBtn">校验</button>
     <button class="tool-btn" id="bulkDeleteBtn" disabled>批量删除</button>
     <button class="tool-btn" id="refreshCasesBtn">刷新</button>
   </div>
@@ -46,8 +47,9 @@
           <th class="num">行号</th>
           <th>Test Case Id</th>
           <th>Trade ID</th>
-          <th>Original Record</th>
-          <th>Business Record</th>
+          <th title="原始记录 ID：sha256(文件名|Sheet 名|行号) 取前 32 位。只与出处有关——改数据不变，换文件 / Sheet / 行号会变；克隆行用 CLONE|源ID|序号 重新计算。">Original Record</th>
+          <th title="业务记录 ID：对产品定义的全部字段取值做 sha256 取前 32 位，含管理列 _TestCaseId、_Remarks。取值按原文本精确参与哈希（不做数值 / 日期归一）；有公式时用公式原文。">Business Record</th>
+          <th title="核心业务记录 ID：算法同 Business Record，但只取业务（交易）字段，不含 _TestCaseId、_Remarks 等管理列。用于判断「交易内容是否相同」。">Core Business Record</th>
           <th>预览字段</th>
           <th class="num">公式</th>
           <th data-no-resize="true">操作</th>

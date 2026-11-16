@@ -35,7 +35,18 @@ async function request(path, options = {}) {
     return null;
   }
   const text = await response.text();
-  return text ? JSON.parse(text) : null;
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    // a proxy or an error page can answer 200 with HTML: report what happened instead of a raw
+    // SyntaxError that says nothing about the request
+    const failure = new Error(`Unexpected response for ${path}: ${text.slice(0, 120)}`);
+    failure.status = response.status;
+    throw failure;
+  }
 }
 
 export const get = (path) => request(path);

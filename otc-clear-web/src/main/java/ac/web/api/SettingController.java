@@ -1,8 +1,8 @@
 package ac.web.api;
 
+import ac.core.service.export.CsvOptionsPatch;
 import ac.core.service.settings.SettingsService;
 import ac.domain.export.CsvFormatOptions;
-import ac.domain.export.ManagedColumnScope;
 import ac.web.config.TenantProvider;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -12,7 +12,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Tenant preferences. */
+/**
+ * Tenant preferences.
+ *
+ * <p>{@code PUT} merges the submitted fields over the stored options, so a client may send only what
+ * it changes.
+ */
 @RestController
 @RequestMapping("/api/settings")
 public class SettingController {
@@ -40,35 +45,42 @@ public class SettingController {
     }
 
     @PutMapping
-    public Map<String, Object> update(@RequestBody Map<String, Object> body) {
-        char delimiter = CsvFormatOptions.parseDelimiter(string(body.get("delimiter"), ","));
-        boolean quoteAll = bool(body.get("quoteAll"), false);
-        boolean includeHeader = bool(body.get("includeHeader"), true);
-        String lineEnding = "LF".equalsIgnoreCase(string(body.get("lineEnding"), "CRLF")) ? "\n" : "\r\n";
-        boolean bom = bool(body.get("bom"), false);
-        ManagedColumnScope scope;
-        try {
-            scope = ManagedColumnScope.valueOf(string(body.get("managedColumns"), "KNOWN"));
-        } catch (IllegalArgumentException e) {
-            scope = ManagedColumnScope.KNOWN;
-        }
-        boolean formulaAsValue = bool(body.get("formulaAsValue"), true);
-        settings.saveExportOptions(tenantProvider.tenantId(),
-                new CsvFormatOptions(delimiter, quoteAll, includeHeader, lineEnding, bom, scope, formulaAsValue));
+    public Map<String, Object> update(@RequestBody CsvOptionsPatch patch) {
+        CsvFormatOptions current = settings.exportOptions(tenantProvider.tenantId());
+        settings.saveExportOptions(tenantProvider.tenantId(), patch.merge(current));
         return get();
     }
 
-    private static String string(Object value, String fallback) {
-        return value == null ? fallback : String.valueOf(value);
+    /** Shell display preferences, currently the inline limit of the import issue lists. */
+    @GetMapping("/ui")
+    public Map<String, Object> ui() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("issueInlineLimit", settings.issueInlineLimit(tenantProvider.tenantId()));
+        return body;
     }
 
-    private static boolean bool(Object value, boolean fallback) {
-        if (value == null) {
-            return fallback;
+    /**
+     * Updates the issue list limit.
+     *
+     * <p>The value is clamped to the supported range rather than rejected, so a slightly off number in
+     * a client does not leave the wizard without a usable display.
+     *
+     * @param patch holds an optional {@code issueInlineLimit}
+     * @return the stored preferences
+     */
+    @PutMapping("/ui")
+    public Map<String, Object> updateUi(@RequestBody UiPatch patch) {
+        if (patch != null && patch.issueInlineLimit() != null) {
+            settings.saveIssueInlineLimit(tenantProvider.tenantId(), patch.issueInlineLimit());
         }
-        if (value instanceof Boolean flag) {
-            return flag;
-        }
-        return Boolean.parseBoolean(String.valueOf(value));
+        return ui();
+    }
+
+    /**
+     * Partial update of the shell preferences.
+     *
+     * @param issueInlineLimit issues listed in place before the paginated panel opens
+     */
+    public record UiPatch(Integer issueInlineLimit) {
     }
 }

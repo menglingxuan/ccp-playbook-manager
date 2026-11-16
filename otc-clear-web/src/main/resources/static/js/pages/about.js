@@ -9,9 +9,12 @@ async function loadContext() {
     const profiles = (ctx.profiles || []).join(', ') || '—';
     const auditRow = ctx.auditEnabled
       ? '<div class="k">审计入口</div><div class="v">已启用</div>' : '';
+    // the tenant is hidden unless the deployment asks for it
+    const tenantRow = ctx.showTenant
+      ? `<div class="k">租户</div><div class="v">${ui.escapeHtml(ctx.tenantId)}</div>` : '';
     ui.setHtml('aboutInfo', `
       <div class="k">模式</div><div class="v">${ctx.mode === 'TENANT' ? '多租户（实例绑定单一租户）' : '单机'}</div>
-      <div class="k">租户</div><div class="v">${ui.escapeHtml(ctx.tenantId)}</div>
+      ${tenantRow}
       <div class="k">数据目录</div><div class="v">${ui.escapeHtml(ctx.dataRoot)}</div>
       <div class="k">版本</div><div class="v">${ui.escapeHtml(ctx.version)}</div>
       <div class="k">数据库</div><div class="v">${ui.escapeHtml(ctx.database || '—')}</div>

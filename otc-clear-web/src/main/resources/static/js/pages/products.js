@@ -1,6 +1,8 @@
 import * as api from '../api.js';
 import * as ui from '../ui.js';
 import { createFieldTable } from '../field-table.js';
+import { bindValidationEditor, loadRules, validationEditorHtml } from '../validation-editor.js';
+import { bindDefinitionBackup } from '../definition-backup.js';
 
 const t = ui.t;
 
@@ -10,6 +12,7 @@ const state = {
   baseId: null,
   base: null,
   options: {},
+  rules: [],
   productId: null,
   productFields: [],
   baseLocked: true,
@@ -103,6 +106,7 @@ function applyLockUi() {
   ui.byId('btnEditBase').disabled = !editable;
   ui.byId('btnDeleteBase').disabled = !editable;
   ui.byId('btnAddField').disabled = !editable;
+  ui.byId('btnQuickFields').disabled = !editable;
 }
 
 function renderBasePanel() {
@@ -340,6 +344,7 @@ function openBaseEditorModal(suggestions) {
       <div class="field">
         <label>${ui.escapeHtml(t('products.form.displayName'))}</label>
         <input id="baseName" type="text" placeholder="${ui.escapeHtml(t('products.form.blankNameHint'))}">
+        <div class="hint">${ui.escapeHtml(t('products.form.nameHint'))}</div>
       </div>
     </div>
     <div class="field" style="margin-bottom:12px">
@@ -447,7 +452,8 @@ function openBaseMetaEditor() {
   const modal = ui.openModal(t('products.btn.editBase'), `
     <div class="params">
       <div class="field"><label>${ui.escapeHtml(t('products.form.displayName'))}</label>
-        <input id="ebName" type="text" value="${ui.escapeHtml(summary.name)}"></div>
+        <input id="ebName" type="text" value="${ui.escapeHtml(summary.name)}">
+        <div class="hint">${ui.escapeHtml(t('products.form.nameHint'))}</div></div>
       <div class="field"><label>${ui.escapeHtml(t('products.form.sortOrder'))}</label>
         <input id="ebOrder" type="number" min="1" value="${summary.sortOrder}"></div>
     </div>
@@ -578,9 +584,15 @@ function openFieldEditor(field) {
     <div class="field"><label>${ui.escapeHtml(t('products.form.remark'))}</label>
       <textarea id="ffRemark" rows="2" placeholder="${ui.escapeHtml(t('products.form.remarkHint'))}">${
   editing ? ui.escapeHtml(field.remark || '') : ''}</textarea></div>
+    ${validationEditorHtml('ff', {
+    value: editing ? field.validationExpr : '',
+    rules: state.rules,
+  })}
     <div class="hint" id="ffHint"></div>`,
   `<button class="tool-btn" id="ffCancel">${ui.escapeHtml(t('common.cancel'))}</button>
    <button class="tool-btn primary" id="ffSave">${ui.escapeHtml(t('common.save'))}</button>`);
+
+  const validation = bindValidationEditor(modal.root, 'ff');
 
   const typeSelect = modal.root.querySelector('#ffType');
   const hint = modal.root.querySelector('#ffHint');
@@ -622,7 +634,12 @@ function openFieldEditor(field) {
       required: modal.root.querySelector('#ffRequired').value === 'true',
       remark: modal.root.querySelector('#ffRemark').value.trim() || null,
       sortOrder: order,
+      validationExpr: validation.expression(),
     };
+    if (!(await validation.validate())) {
+      ui.toast(t('validation.toast.invalidExpr'), 'error');
+      return;
+    }
     try {
       if (editing) {
         await api.patch(`/api/catalog/base-products/${base.baseProduct.id}/fields/${field.id}`, payload);
@@ -686,7 +703,8 @@ function openProductCreator() {
       <div class="field"><label>${ui.escapeHtml(t('products.form.productCode'))}</label>
         <input id="prCode" type="text" placeholder="IRS_SIMPLE"></div>
       <div class="field"><label>${ui.escapeHtml(t('products.form.displayName'))}</label>
-        <input id="prName" type="text"></div>
+        <input id="prName" type="text">
+        <div class="hint">${ui.escapeHtml(t('products.form.productNameHint'))}</div></div>
     </div>
     <div class="field"><label>${ui.escapeHtml(t('products.form.description'))}</label>
       <input id="prDesc" type="text" placeholder="${ui.escapeHtml(t('products.form.optionalHint'))}">
@@ -723,7 +741,8 @@ function openProductEditor(product) {
   const modal = ui.openModal(`${t('common.edit')} · ${product.code}`, `
     <div class="params">
       <div class="field"><label>${ui.escapeHtml(t('products.form.displayName'))}</label>
-        <input id="peName" type="text" value="${ui.escapeHtml(product.name)}"></div>
+        <input id="peName" type="text" value="${ui.escapeHtml(product.name)}">
+        <div class="hint">${ui.escapeHtml(t('products.form.productNameHint'))}</div></div>
       <div class="field"><label>${ui.escapeHtml(t('products.form.strict'))}</label>
         <label class="switch ${product.strictMatch ? 'on' : ''}">
           <input type="checkbox" id="peStrict" ${product.strictMatch ? 'checked' : ''}>
@@ -958,6 +977,12 @@ function openProductFieldEditor(product, field) {
   const requiredHint = businessField
     ? t('products.form.businessRequiredHint')
     : t('products.drawer.requiredLocked');
+  const baseField = (state.base ? state.base.fields : []).find((entry) => entry.id === field.baseFieldId);
+  const baseExpr = baseField ? baseField.validationExpr : null;
+  const inheritedExpr = !baseExpr || baseExpr === field.validationExpr;
+  const exprHint = baseExpr
+    ? t(inheritedExpr ? 'validation.form.inherited' : 'validation.form.overridden', baseExpr)
+    : t('validation.form.clearHint');
   const modal = ui.openModal(`${t('products.btn.productFields')} · ${field.header}`, `
     <div class="params">
       <div class="field">
@@ -974,10 +999,12 @@ function openProductFieldEditor(product, field) {
     <div class="field" style="margin-bottom:10px"><label>${ui.escapeHtml(t('products.form.tags'))}</label>${tagSelector(field.tags)}</div>
     <div class="field"><label>${ui.escapeHtml(t('products.form.remark'))}</label>
       <textarea id="pfRemark" rows="2" placeholder="${ui.escapeHtml(t('products.form.remarkHint'))}">${
-  ui.escapeHtml(field.remark || '')}</textarea></div>`,
+  ui.escapeHtml(field.remark || '')}</textarea></div>
+    ${validationEditorHtml('pf', { value: field.validationExpr, rules: state.rules, hint: exprHint })}`,
   `<button class="tool-btn" id="pfCancel">${ui.escapeHtml(t('common.cancel'))}</button>
    <button class="tool-btn primary" id="pfSave">${ui.escapeHtml(t('common.save'))}</button>`);
   bindTagPills(modal.root);
+  const validation = bindValidationEditor(modal.root, 'pf');
 
   modal.root.querySelector('#pfCancel').addEventListener('click', modal.close);
   modal.root.querySelector('#pfSave').addEventListener('click', async () => {
@@ -995,7 +1022,12 @@ function openProductFieldEditor(product, field) {
       sortOrder: order,
       tags: readSelectedTags(modal.root),
       remark: modal.root.querySelector('#pfRemark').value.trim() || null,
+      validationExpr: validation.expression(),
     };
+    if (!(await validation.validate())) {
+      ui.toast(t('validation.toast.invalidExpr'), 'error');
+      return;
+    }
     try {
       await api.patch(`/api/catalog/products/${product.id}/fields/${field.id}`, payload);
       modal.close();
@@ -1201,6 +1233,11 @@ async function init() {
   } catch (error) {
     ui.showError(error);
   }
+  try {
+    state.rules = await loadRules(true);
+  } catch (error) {
+    state.rules = [];
+  }
 
   baseTable = createFieldTable({
     root: ui.byId('baseFieldTable'),
@@ -1213,10 +1250,39 @@ async function init() {
   });
   baseTable.setOptions(state.options);
 
-  ui.on('btnNewBase', 'click', openBaseEditor);
-  ui.on('btnEditBase', 'click', openBaseMetaEditor);
+  ui.on('btnNewBase', 'click', openBaseEditor);  ui.on('btnEditBase', 'click', openBaseMetaEditor);
   ui.on('btnDeleteBase', 'click', deleteBase);
   ui.on('btnAddField', 'click', () => openFieldEditor(null));
+  ui.on('btnQuickFields', 'click', () => {
+    if (!state.base) {
+      return;
+    }
+    ui.byId('quickFieldsFile').click();
+  });
+  ui.on('quickFieldsFile', 'change', async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    if (!file || !state.base) {
+      return;
+    }
+    const button = ui.byId('btnQuickFields');
+    button.disabled = true;
+    try {
+      const result = await api.upload(
+        `/api/catalog/base-products/${encodeURIComponent(state.baseId)}/fields/from-csv`, file);
+      const created = (result.created || []).length;
+      if (created) {
+        ui.toast(t('products.toast.quickFieldsCreated', created, result.headers || 0), 'ok');
+      } else {
+        ui.toast(t('products.toast.quickFieldsNothing', result.headers || 0), 'warn');
+      }
+      await loadBase(state.baseId);
+    } catch (error) {
+      ui.showError(error);
+    } finally {
+      button.disabled = !(state.base && !state.baseLocked);
+    }
+  });
   ui.on('btnNewProduct', 'click', openProductCreator);
   ui.on('btnGlobalSearch', 'click', openGlobalSearch);
   ui.on('btnLockBase', 'click', () => {
@@ -1232,6 +1298,14 @@ async function init() {
       event.preventDefault();
       openGlobalSearch();
     }
+  });
+  bindDefinitionBackup('PRODUCT', {
+    sql: 'btnExportSql',
+    xlsx: 'btnExportXlsx',
+    import: 'btnImportDefinitions',
+  }, {
+    label: t('definitions.scope.product'),
+    onApplied: refreshAll,
   });
   await refreshAll();
 }

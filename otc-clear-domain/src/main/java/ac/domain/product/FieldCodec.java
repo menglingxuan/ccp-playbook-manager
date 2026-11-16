@@ -2,6 +2,8 @@ package ac.domain.product;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -26,6 +28,23 @@ public final class FieldCodec {
             DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.ROOT),
             DateTimeFormatter.ofPattern("d-MMM-yyyy", Locale.ROOT));
 
+    private static final List<DateTimeFormatter> TIME_FORMATS = List.of(
+            DateTimeFormatter.ISO_LOCAL_TIME,
+            DateTimeFormatter.ofPattern("H:mm", Locale.ROOT),
+            DateTimeFormatter.ofPattern("H:mm:ss", Locale.ROOT),
+            DateTimeFormatter.ofPattern("h:mm a", Locale.ROOT));
+
+    private static final List<DateTimeFormatter> DATETIME_FORMATS = List.of(
+            DateTimeFormatter.ISO_LOCAL_DATE_TIME,
+            DateTimeFormatter.ofPattern("yyyy/M/d H:mm", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy/M/d H:mm:ss", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy/M/d H:mm:ss.SSS", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd H:mm", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd H:mm:ss", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd H:mm:ss.SSS", Locale.ROOT),
+            DateTimeFormatter.ofPattern("d/M/yyyy H:mm", Locale.ROOT),
+            DateTimeFormatter.ofPattern("d/M/yyyy H:mm:ss", Locale.ROOT));
+
     private FieldCodec() {
     }
 
@@ -40,6 +59,8 @@ public final class FieldCodec {
             case INTEGER -> parseInteger(field, text);
             case DECIMAL -> parseDecimal(field, text);
             case DATE -> parseDate(field, text);
+            case TIME -> parseTime(field, text);
+            case DATETIME -> parseDateTime(field, text);
             case BOOLEAN -> parseBoolean(field, text);
         };
     }
@@ -143,8 +164,31 @@ public final class FieldCodec {
         throw new FieldFormatException(field.key(), text, "Value '" + text + "' is not a supported date");
     }
 
-    private static Object parseBoolean(FieldDef field, String text) {
-        String value = text.toLowerCase(Locale.ROOT).replace(" ", "");
+    /** Parses a clock time; the normalized copy is an ISO {@code LocalTime}. */
+    private static Object parseTime(FieldDef field, String text) {
+        for (DateTimeFormatter formatter : TIME_FORMATS) {
+            try {
+                return LocalTime.parse(text, formatter);
+            } catch (DateTimeParseException ignored) {
+                // try the next supported pattern
+            }
+        }
+        throw new FieldFormatException(field.key(), text, "Value '" + text + "' is not a supported time");
+    }
+
+    /** Parses a date with a clock time; the normalized copy is an ISO {@code LocalDateTime}. */
+    private static Object parseDateTime(FieldDef field, String text) {
+        for (DateTimeFormatter formatter : DATETIME_FORMATS) {
+            try {
+                return LocalDateTime.parse(text, formatter);
+            } catch (DateTimeParseException ignored) {
+                // try the next supported pattern
+            }
+        }
+        throw new FieldFormatException(field.key(), text, "Value '" + text + "' is not a supported date time");
+    }
+
+    private static Object parseBoolean(FieldDef field, String text) {        String value = text.toLowerCase(Locale.ROOT).replace(" ", "");
         return switch (value) {
             case "y", "yes", "true", "t", "1" -> Boolean.TRUE;
             case "n", "no", "false", "f", "0" -> Boolean.FALSE;

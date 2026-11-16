@@ -55,7 +55,7 @@ public class ImportController {
             StoredUpload stored = uploadStore.save(tenantId, fileName, file.getInputStream(), file.getSize());
             return previewService.describe(tenantId, stored.uploadId());
         } catch (IOException e) {
-            throw new ApiException(ErrorCode.INTERNAL_ERROR, "Cannot read the uploaded file: " + e.getMessage());
+            throw new ApiException(ErrorCode.INTERNAL_ERROR, "The uploaded file could not be read");
         }
     }
 
@@ -69,15 +69,28 @@ public class ImportController {
         return previewService.preview(tenantProvider.tenantId(), uploadId, request);
     }
 
+    /**
+     * One page of converted rows, used by the wizard pager to browse a whole file.
+     *
+     * @param uploadId upload identifier
+     * @param request  sheet, product, layout parameters and the page offset
+     */
+    @PostMapping("/uploads/{uploadId}/preview/rows")
+    public PreviewService.PreviewPage previewRows(@PathVariable String uploadId,
+            @RequestBody PreviewRequest request) {
+        return previewService.previewPage(tenantProvider.tenantId(), uploadId, request);
+    }
+
     @GetMapping("/uploads/{uploadId}/sheets/{sheetIndex}/raw")
     public Map<String, Object> raw(@PathVariable String uploadId, @PathVariable int sheetIndex,
-            @RequestParam(defaultValue = "20") int rows) {
-        var table = previewService.rawSheet(tenantProvider.tenantId(), uploadId, sheetIndex, rows);
+            @RequestParam(defaultValue = "20") int rows,
+            @RequestParam(defaultValue = "0") int offset) {
+        var table = previewService.rawSheetPage(tenantProvider.tenantId(), uploadId, sheetIndex, offset, rows);
         List<Map<String, Object>> data = new ArrayList<>();
         for (int rowIndex = 0; rowIndex < table.rowCount(); rowIndex++) {
             var row = table.row(rowIndex);
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("row", rowIndex + 1);
+            item.put("row", offset + rowIndex + 1);
             item.put("values", List.of(row.texts() == null ? new String[0] : row.texts()));
             List<String> formulas = new ArrayList<>();
             for (int column = 0; column < table.columnCount(); column++) {
@@ -86,7 +99,12 @@ public class ImportController {
             item.put("formulas", formulas);
             data.add(item);
         }
-        return Map.of("sheetName", table.sheetName(), "rows", data);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("sheetName", table.sheetName());
+        body.put("rows", data);
+        body.put("totalRows", table.declaredRowCount());
+        body.put("offset", offset);
+        return body;
     }
 
     @PostMapping("/imports")

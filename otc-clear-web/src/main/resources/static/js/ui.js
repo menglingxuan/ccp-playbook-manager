@@ -31,6 +31,61 @@ export function setHtml(id, html) {
   }
 }
 
+/**
+ * Delays a call until the caller stops firing for {@code delay} milliseconds.
+ *
+ * <p>One implementation for every search box and filter: the pages used to carry eight copies with
+ * different delays, so the same interaction felt different per page.
+ */
+export function debounce(fn, delay = 220) {
+  let timer = 0;
+  return function debounced(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+// --------------------------------------------------------------- request order
+
+/**
+ * Guards a load function against out-of-order responses.
+ *
+ * <p>Every call returns a token check: only the newest request may render, so switching filters or
+ * batches quickly never shows the result of an older request.
+ */
+export function sequence() {
+  let current = 0;
+  return {
+    next() {
+      current += 1;
+      const token = current;
+      return () => token === current;
+    },
+  };
+}
+
+/**
+ * Shows a loading placeholder in a table body or a plain container.
+ *
+ * <p>Without it the first paint of a slow list looks like an empty result, which reads as "no data".
+ *
+ * @param {string} id      container id
+ * @param {number} columns column count when the container is a tbody
+ */
+export function markLoading(id, columns = 1) {
+  const node = byId(id);
+  if (!node) {
+    return;
+  }
+  if (node.tagName === 'TBODY') {
+    node.innerHTML = `<tr class="loading-row"><td colspan="${columns}">`
+      + `<span class="spinner" aria-hidden="true"></span> ${escapeHtml('加载中…')}</td></tr>`;
+    return;
+  }
+  node.innerHTML = `<div class="loading-row"><span class="spinner" aria-hidden="true"></span> ${
+    escapeHtml('加载中…')}</div>`;
+}
+
 // ----------------------------------------------------------------------- i18n
 
 const I18N_KEY = 'otc.i18n';
@@ -134,6 +189,12 @@ const ICONS = {
   grip: 'M6 3.6h.01M6 8h.01M6 12.4h.01M10 3.6h.01M10 8h.01M10 12.4h.01',
   upload: 'M8 10.6V2.8M4.9 5.9L8 2.8l3.1 3.1M2.8 10.4v1.4a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.4',
   copy: 'M5.6 5.6h7.2v7.2H5.6zM3.2 10.4V3.2h7.2',
+  eye: 'M1.8 8s2.4-4.1 6.2-4.1S14.2 8 14.2 8s-2.4 4.1-6.2 4.1S1.8 8 1.8 8zM8 9.8a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6z',
+  download: 'M8 2.6v7.4M4.9 6.9L8 10l3.1-3.1M2.8 12.4h10.4',
+  check: 'M3.2 8.3l3.2 3.2 6.4-6.9',
+  alert: 'M8 2.8l5.4 9.9H2.6L8 2.8zM8 6.4v2.4M8 10.6h.01',
+  slash: 'M4.2 11.8l7.6-7.6',
+  diff: 'M2.6 4.4h5.2v5.2H2.6zM8.2 6.4h5.2v5.2H8.2z',
 };
 
 /** Returns an inline SVG icon that inherits the current text color. */
@@ -148,6 +209,12 @@ export function icon(name, size = 14) {
 export function iconButton(name, title, extraClass = '', attrs = '') {
   const label = escapeHtml(title);
   return `<button type="button" class="icon-btn ${extraClass}" title="${label}" aria-label="${label}" ${attrs}>${icon(name)}</button>`;
+}
+
+/** Builds an icon-only link with a tooltip and an accessible name. */
+export function iconLink(name, href, title, extraClass = '', attrs = '') {
+  const label = escapeHtml(title);
+  return `<a class="icon-btn ${extraClass}" href="${escapeHtml(href)}" title="${label}" aria-label="${label}" ${attrs}>${icon(name)}</a>`;
 }
 
 // -------------------------------------------------------------------- statuses
@@ -181,7 +248,21 @@ export function statusLabel(status) {
 }
 
 export function statusBadge(status) {
-  const tone = {
+  return `<span class="badge ${statusTone(status)}">${escapeHtml(statusLabel(status))}</span>`;
+}
+
+/** Compact status indicator: only the state icon, the label lives in the tooltip. */
+export function statusTag(status) {
+  const label = escapeHtml(statusLabel(status));
+  const tone = statusTone(status);
+  const glyph = tone === 'pass' ? 'check' : tone === 'muted' ? 'slash' : 'alert';
+  return `<span class="status-tag ${tone}" title="${label}" aria-label="${label}" role="img">${
+    icon(glyph, 11)}</span>`;
+}
+
+/** Colour tone of one status, shared by the badges and the icon only indicators. */
+export function statusTone(status) {
+  return {
     SUCCEEDED: 'pass',
     PARTIAL: 'warn',
     FAILED: 'fail',
@@ -199,7 +280,6 @@ export function statusBadge(status) {
     ENABLED: 'pass',
     DISABLED: 'muted',
   }[status] || 'muted';
-  return `<span class="badge ${tone}">${escapeHtml(statusLabel(status))}</span>`;
 }
 
 export function issueLevelBadge(level) {
@@ -214,11 +294,13 @@ export function toast(message, type = 'info') {
   if (!host) {
     return;
   }
+  // callers use both error/ok and bad/warn; normalise so a failure never looks like a plain note
+  const tone = type === 'bad' ? 'error' : type;
   const node = document.createElement('div');
-  node.className = `toast ${type}`;
+  node.className = `toast ${tone}`;
   node.textContent = message;
   host.appendChild(node);
-  setTimeout(() => node.remove(), type === 'error' ? 7000 : 3500);
+  setTimeout(() => node.remove(), tone === 'error' ? 7000 : 3500);
 }
 
 export function showError(error) {
@@ -286,39 +368,157 @@ export function renderPager(containerId, page, totalPages, total, onGo) {
 
 // ---------------------------------------------------------------------- modal
 
-/** Opens a modal and returns the dialog element. */
-export function openModal(title, bodyHtml, footerHtml = '') {
-  const host = byId('modalHost') || document.body;
+/** Opens a side drawer with the shared close behaviour (Esc, backdrop click, focus restore). */
+export function openDrawer(options) {
+  const host = byId('drawerHost') || document.body;
   const backdrop = document.createElement('div');
-  backdrop.className = 'modal-backdrop';
+  backdrop.className = 'drawer-backdrop';
+  const wide = options.wide ? ' wide' : '';
+  const tools = options.toolsHtml
+    ? `<div class="drawer-tools v-toolbar">${options.toolsHtml}</div>` : '';
+  const foot = options.footerHtml
+    ? `<div class="drawer-foot row-actions">${options.footerHtml}</div>` : '';
   backdrop.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true">
-      <div class="modal-head">
-        <h3>${escapeHtml(title)}</h3>
-        <button class="modal-close" aria-label="${escapeHtml(t('common.close'))}">×</button>
+    <div class="drawer${wide}" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+      <div class="drawer-head">
+        <div>
+          <h3 id="drawerTitle">${escapeHtml(options.title || '')}</h3>
+          <div class="mono-sm drawer-subtitle">${escapeHtml(options.subtitle || '')}</div>
+        </div>
+        <div class="row-actions">
+          <button class="modal-close" data-drawer-close aria-label="${escapeHtml(t('common.close'))}">×</button>
+        </div>
       </div>
-      <div class="modal-body">${bodyHtml}</div>
-      ${footerHtml ? `<div class="modal-foot">${footerHtml}</div>` : ''}
+      ${tools}
+      <div class="drawer-body">${options.bodyHtml || ''}</div>
+      ${foot}
     </div>`;
-  host.appendChild(backdrop);
+  const previousFocus = document.activeElement;
+  let closed = false;
   const close = () => {
-    backdrop.remove();
+    if (closed) {
+      return;
+    }
+    closed = true;
     document.removeEventListener('keydown', onKey);
+    backdrop.remove();
+    if (options.onClose) {
+      options.onClose();
+    }
+    if (previousFocus && document.contains(previousFocus)) {
+      previousFocus.focus();
+    }
   };
   const onKey = (event) => {
     if (event.key === 'Escape') {
       close();
     }
   };
+  host.appendChild(backdrop);
   document.addEventListener('keydown', onKey);
-  backdrop.querySelector('.modal-close').addEventListener('click', close);
+  backdrop.querySelector('[data-drawer-close]').addEventListener('click', close);
   backdrop.addEventListener('click', (event) => {
     if (event.target === backdrop) {
       close();
     }
   });
+  const body = backdrop.querySelector('.drawer-body');
+  return {
+    root: backdrop,
+    body,
+    tools: backdrop.querySelector('.drawer-tools'),
+    foot: backdrop.querySelector('.drawer-foot'),
+    setTitle(title, subtitle) {
+      backdrop.querySelector('#drawerTitle').textContent = title || '';
+      backdrop.querySelector('.drawer-subtitle').textContent = subtitle || '';
+    },
+    close,
+  };
+}
+
+/** Open dialogs, last one on top; Escape only dismisses the topmost dialog. */
+const modalStack = [];
+
+/** Elements that can take focus inside a dialog, in tab order. */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), '
+  + 'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Moves focus into the dialog and keeps Tab inside it while it is open. */
+function trapFocus(backdrop, entry) {
+  const focusables = () => Array.from(backdrop.querySelectorAll(FOCUSABLE))
+    .filter((node) => node.offsetParent !== null);
+  const first = focusables()[0];
+  entry.previousFocus = document.activeElement;
+  if (first) {
+    first.focus();
+  }
+  entry.trap = (event) => {
+    if (event.key !== 'Tab') {
+      return;
+    }
+    const items = focusables();
+    if (!items.length) {
+      return;
+    }
+    const firstItem = items[0];
+    const lastItem = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === firstItem) {
+      event.preventDefault();
+      lastItem.focus();
+    } else if (!event.shiftKey && document.activeElement === lastItem) {
+      event.preventDefault();
+      firstItem.focus();
+    }
+  };
+  document.addEventListener('keydown', entry.trap);
+}
+
+/** Opens a modal and returns the dialog element. */
+export function openModal(title, bodyHtml, footerHtml = '', options = {}) {
+  const host = byId('modalHost') || document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal${options.wide ? ' modal-wide' : ''}" role="dialog" aria-modal="true"
+         aria-labelledby="modalTitle${modalStack.length}">
+      <div class="modal-head">
+        <h3 id="modalTitle${modalStack.length}">${escapeHtml(title)}</h3>
+        <button class="modal-close" aria-label="${escapeHtml(t('common.close'))}">×</button>
+      </div>
+      <div class="modal-body">${bodyHtml}</div>
+      ${footerHtml ? `<div class="modal-foot">${footerHtml}</div>` : ''}
+    </div>`;
+  host.appendChild(backdrop);
+  const entry = {};
+  entry.close = () => {
+    backdrop.remove();
+    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('keydown', entry.trap);
+    const index = modalStack.indexOf(entry);
+    if (index >= 0) {
+      modalStack.splice(index, 1);
+    }
+    // hand the focus back to whatever opened the dialog
+    if (entry.previousFocus && document.contains(entry.previousFocus)) {
+      entry.previousFocus.focus();
+    }
+  };
+  const onKey = (event) => {
+    if (event.key === 'Escape' && modalStack[modalStack.length - 1] === entry) {
+      entry.close();
+    }
+  };
+  modalStack.push(entry);
+  document.addEventListener('keydown', onKey);
+  backdrop.querySelector('.modal-close').addEventListener('click', entry.close);
+  backdrop.addEventListener('click', (event) => {
+    if (event.target === backdrop) {
+      entry.close();
+    }
+  });
   applyI18n(backdrop);
-  return { root: backdrop, close };
+  trapFocus(backdrop, entry);
+  return { root: backdrop, close: entry.close };
 }
 
 // -------------------------------------------------------------- long text panel
@@ -465,7 +665,13 @@ export async function initShell() {
     const ctx = await context();
     const badge = byId('ctxBadge');
     if (badge) {
-      badge.textContent = ctx.mode === 'TENANT' ? t('shell.mode.tenant', ctx.tenantId) : t('shell.mode.single');
+      if (ctx.showTenant === false) {
+        // the deployment keeps the tenant private, so the badge never appears
+        badge.remove();
+      } else {
+        badge.textContent = ctx.mode === 'TENANT'
+          ? t('shell.mode.tenant', ctx.tenantId) : t('shell.mode.single');
+      }
     }
     const sub = byId('ctxSub');
     if (sub) {

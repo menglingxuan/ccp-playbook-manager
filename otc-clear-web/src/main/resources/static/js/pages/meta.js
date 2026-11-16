@@ -1,5 +1,7 @@
 import * as api from '../api.js';
 import * as ui from '../ui.js';
+import { bindDefinitionBackup } from '../definition-backup.js';
+import { invalidateRules } from '../validation-editor.js';
 
 const t = ui.t;
 
@@ -7,6 +9,23 @@ const state = {
   sets: [],
   setCode: null,
 };
+
+/** Display label of a meta set kind. */
+function kindLabel(type) {
+  if (type === 'FORMULA') {
+    return t('meta.kind.formula');
+  }
+  if (type === 'TAG') {
+    return t('meta.kind.tag');
+  }
+  return type === 'VALIDATION' ? t('meta.kind.validation') : t('meta.kind.value');
+}
+
+/** True when the current set holds field validation rules. */
+function isRuleSet() {
+  const entry = currentSet();
+  return Boolean(entry && entry.set.type === 'VALIDATION');
+}
 
 function currentSet() {
   return state.sets.find((entry) => entry.set.code === state.setCode) || null;
@@ -22,9 +41,11 @@ function renderSetList() {
     .map(({ set }) => {
       const active = set.code === state.setCode ? 'active' : '';
       const kind = set.builtIn ? t('meta.builtIn') : t('meta.customSet');
+      const setKind = kindLabel(set.type);
       return `<div class="item ${active}" data-set="${ui.escapeHtml(set.code)}">
         <div class="item-id">${ui.escapeHtml(set.code)}</div>
-        <div class="item-sub">${ui.escapeHtml(set.name)} · ${set.itemCount} · ${ui.escapeHtml(kind)}</div>
+        <div class="item-sub">${ui.escapeHtml(set.name)} · ${set.itemCount} · ${ui.escapeHtml(setKind)}
+          · ${ui.escapeHtml(kind)}</div>
       </div>`;
     })
     .join('');
@@ -50,13 +71,16 @@ function renderSetPanel() {
     return;
   }
   const set = entry.set;
-  ui.byId('setTitle').textContent = `${set.code} · ${set.name}`;
+  const setKind = kindLabel(set.type);
+  ui.byId('setTitle').textContent = `${set.code} · ${set.name} · ${setKind}`;
   ui.byId('setMeta').innerHTML = `
     <div class="kv">
       <span class="k">${ui.escapeHtml(t('common.description'))}</span>
       <span class="v">${ui.escapeHtml(set.description || '—')}</span>
       <span class="k">${ui.escapeHtml(t('meta.column.items'))}</span>
       <span class="v">${set.itemCount}</span>
+      <span class="k">${ui.escapeHtml(t('meta.form.kind'))}</span>
+      <span class="v">${ui.escapeHtml(setKind)}</span>
       <span class="k">${ui.escapeHtml(t('meta.column.type'))}</span>
       <span class="v">${ui.escapeHtml(set.builtIn ? t('meta.builtIn') : t('meta.customSet'))}</span>
     </div>`;
@@ -65,8 +89,15 @@ function renderSetPanel() {
     .map((item) => `
       <tr data-item="${ui.escapeHtml(item.code)}">
         <td class="num">${item.sortOrder}</td>
-        <td class="mono">${ui.escapeHtml(item.code)}</td>
+        <td class="mono">${ui.escapeHtml(item.code)}${
+  item.readonly ? ' <span class="chip muted" title="业务处理依赖该取值，不可编辑或删除">必须</span>' : ''}</td>
         <td>${ui.escapeHtml(item.label)}</td>
+        <td class="mono">${item.content ? ui.escapeHtml(item.content) : '<span class="muted">—</span>'}${
+  set.type === 'VALIDATION' && item.content
+    ? ` <span class="chip ${item.severity === 'ERROR' ? 'fail' : 'warn'}" title="${ui.escapeHtml(
+      t('meta.form.severityHint'))}">${ui.escapeHtml(item.severity === 'ERROR'
+      ? t('meta.severity.errorShort') : t('meta.severity.warnShort'))}</span>`
+    : ''}</td>
         <td>${item.refSetCode
           ? `<span class="chip info">${ui.escapeHtml(item.refSetCode)}</span>`
           : '<span class="muted">—</span>'}</td>
@@ -76,16 +107,18 @@ function renderSetPanel() {
         <td>${ui.longTextCell(item.remark, 26)}</td>
         <td>
           <div class="row-actions">
-            ${ui.iconButton('edit', t('common.edit'), 'sm', 'data-act="edit"')}
-            ${ui.iconButton('trash', t('common.delete'), 'sm danger', 'data-act="delete"')}
+            ${item.readonly ? '' : ui.iconButton('edit', t('common.edit'), 'sm', 'data-act="edit"')}
+            ${item.readonly ? '' : ui.iconButton('trash', t('common.delete'), 'sm danger', 'data-act="delete"')}
           </div>
         </td>
       </tr>`)
     .join('');
   const body = ui.byId('itemRows');
-  body.innerHTML = rows || `<tr><td class="empty" colspan="7">${ui.escapeHtml(t('common.none'))}</td></tr>`;
+  body.innerHTML = rows || `<tr><td class="empty" colspan="8">${ui.escapeHtml(t('common.none'))}</td></tr>`;
+  // the item of a row is looked up once per row instead of scanning the list for every row
+  const itemsByCode = new Map(entry.items.map((item) => [item.code, item]));
   body.querySelectorAll('tr[data-item]').forEach((row) => {
-    const item = entry.items.find((entryItem) => entryItem.code === row.dataset.item);
+    const item = itemsByCode.get(row.dataset.item);
     row.querySelectorAll('button[data-act]').forEach((button) => {
       button.addEventListener('click', () => {
         if (button.dataset.act === 'edit') {
@@ -123,6 +156,13 @@ function openSetEditor() {
         <input id="msCode" type="text" placeholder="CONV_METHOD"></div>
       <div class="field"><label>${ui.escapeHtml(t('products.form.displayName'))}</label>
         <input id="msName" type="text"></div>
+      <div class="field"><label>${ui.escapeHtml(t('meta.form.kind'))}</label>
+        <select id="msKind">
+          <option value="VALUE">${ui.escapeHtml(t('meta.kind.value'))}</option>
+          <option value="FORMULA">${ui.escapeHtml(t('meta.kind.formula'))}</option>
+          <option value="TAG">${ui.escapeHtml(t('meta.kind.tag'))}</option>
+          <option value="VALIDATION">${ui.escapeHtml(t('meta.kind.validation'))}</option>
+        </select></div>
     </div>
     <div class="field"><label>${ui.escapeHtml(t('common.description'))}</label>
       <input id="msDesc" type="text" placeholder="${ui.escapeHtml(t('products.form.optionalHint'))}"></div>`,
@@ -135,6 +175,7 @@ function openSetEditor() {
         code: modal.root.querySelector('#msCode').value.trim().toUpperCase(),
         name: modal.root.querySelector('#msName').value.trim(),
         description: modal.root.querySelector('#msDesc').value.trim() || null,
+        type: modal.root.querySelector('#msKind').value,
       });
       modal.close();
       ui.toast(t('meta.toast.setCreated', created.code), 'ok');
@@ -158,6 +199,17 @@ function openSetMetaEditor() {
         <input id="esName" type="text" value="${ui.escapeHtml(set.name)}"></div>
       <div class="field"><label>${ui.escapeHtml(t('products.form.sortOrder'))}</label>
         <input id="esOrder" type="number" min="0" value="${set.sortOrder}"></div>
+      <div class="field"><label>${ui.escapeHtml(t('meta.form.kind'))}</label>
+        <select id="esKind">
+          <option value="VALUE"${set.type === 'VALUE' ? ' selected' : ''}>${
+  ui.escapeHtml(t('meta.kind.value'))}</option>
+          <option value="FORMULA"${set.type === 'FORMULA' ? ' selected' : ''}>${
+  ui.escapeHtml(t('meta.kind.formula'))}</option>
+          <option value="TAG"${set.type === 'TAG' ? ' selected' : ''}>${
+  ui.escapeHtml(t('meta.kind.tag'))}</option>
+          <option value="VALIDATION"${set.type === 'VALIDATION' ? ' selected' : ''}>${
+  ui.escapeHtml(t('meta.kind.validation'))}</option>
+        </select></div>
     </div>
     <div class="field"><label>${ui.escapeHtml(t('common.description'))}</label>
       <input id="esDesc" type="text" value="${ui.escapeHtml(set.description || '')}"></div>`,
@@ -171,6 +223,7 @@ function openSetMetaEditor() {
         name: modal.root.querySelector('#esName').value.trim(),
         description: modal.root.querySelector('#esDesc').value.trim() || null,
         sortOrder: Number(modal.root.querySelector('#esOrder').value) || set.sortOrder,
+        type: modal.root.querySelector('#esKind').value,
       });
       modal.close();
       ui.toast(t('meta.toast.setSaved'), 'ok');
@@ -206,12 +259,41 @@ function openItemEditor(item) {
     return;
   }
   const editing = Boolean(item);
+  const isRule = entry.set.type === 'VALIDATION';
+  const ruleType = editing && item.ruleType ? item.ruleType : 'REGEX';
+  const severity = editing && item.severity ? item.severity : 'WARN';
+  const ruleForm = isRule ? `
+    <div class="params">
+      <div class="field"><label>${ui.escapeHtml(t('meta.form.ruleType'))}</label>
+        <select id="miRuleType">
+          <option value="REGEX"${ruleType === 'REGEX' ? ' selected' : ''}>${ui.escapeHtml(t('meta.ruleType.regex'))}</option>
+          <option value="WILDCARD"${ruleType === 'WILDCARD' ? ' selected' : ''}>${ui.escapeHtml(t('meta.ruleType.wildcard'))}</option>
+        </select></div>
+      <div class="field"><label>${ui.escapeHtml(t('meta.form.severity'))}</label>
+        <select id="miSeverity">
+          <option value="WARN"${severity === 'WARN' ? ' selected' : ''}>${ui.escapeHtml(t('meta.severity.warn'))}</option>
+          <option value="ERROR"${severity === 'ERROR' ? ' selected' : ''}>${ui.escapeHtml(t('meta.severity.error'))}</option>
+        </select>
+        <div class="hint">${ui.escapeHtml(t('meta.form.severityHint'))}</div></div>
+      <div class="field"><label>${ui.escapeHtml(t('meta.form.rulePattern'))}</label>
+        <input id="miContent" type="text" class="mono" placeholder="${ui.escapeHtml(
+    ruleType === 'REGEX' ? '^[A-Z]{3}$' : '???')}" value="${editing ? ui.escapeHtml(item.content || '') : ''}">
+        <div class="hint" id="miPatternState"></div></div>
+    </div>
+    <div class="field"><label>${ui.escapeHtml(t('meta.form.ruleTest'))}</label>
+      <div class="inline-row">
+        <input id="miTestText" type="text" placeholder="${ui.escapeHtml(t('meta.form.ruleTestHint'))}">
+        <button class="tool-btn" id="miTestRun" type="button">${ui.escapeHtml(t('meta.form.ruleTestRun'))}</button>
+      </div>
+      <div class="hint" id="miTestResult"></div></div>` : '';
   const modal = ui.openModal(editing ? `${t('common.edit')} · ${item.code}` : t('meta.btn.newItem'), `
     <div class="params">
       <div class="field"><label>${ui.escapeHtml(t('meta.form.itemCode'))}</label>
-        <input id="miCode" type="text" value="${editing ? ui.escapeHtml(item.code) : ''}" ${editing ? 'readonly' : ''}></div>
+        <input id="miCode" type="text" value="${editing ? ui.escapeHtml(item.code) : ''}" ${editing ? 'readonly' : ''}>
+        ${isRule ? `<div class="hint">${ui.escapeHtml(t('meta.form.ruleCodeHint'))}</div>` : ''}</div>
       <div class="field"><label>${ui.escapeHtml(t('meta.form.label'))}</label>
-        <input id="miLabel" type="text" value="${editing ? ui.escapeHtml(item.label) : ''}"></div>
+        <input id="miLabel" type="text" value="${editing ? ui.escapeHtml(item.label) : ''}">
+        <div class="hint">${ui.escapeHtml(t('meta.form.labelHint'))}</div></div>
       <div class="field"><label>${ui.escapeHtml(t('meta.form.refSet'))}</label>
         <select id="miRef">
           <option value="">${ui.escapeHtml(t('meta.form.noRef'))}</option>
@@ -227,17 +309,93 @@ function openItemEditor(item) {
         </select>
       </div>
     </div>
+    ${ruleForm}
     <div class="field"><label>${ui.escapeHtml(t('common.remark'))}</label>
       <textarea id="miRemark" rows="2" placeholder="${ui.escapeHtml(t('products.form.remarkHint'))}">${
   editing ? ui.escapeHtml(item.remark || '') : ''}</textarea></div>
+    ${isRule ? '' : `<div class="field"><label>${ui.escapeHtml(t('meta.form.content'))}</label>
+      <textarea id="miContent" rows="2" placeholder="${ui.escapeHtml(
+    entry.set.type === 'FORMULA' ? '=D2*E2' : t('meta.form.contentHint'))}">${
+  editing ? ui.escapeHtml(item.content || '') : ''}</textarea></div>`}
+    <div class="hint">${ui.escapeHtml(t('meta.form.contentHint'))}</div>
     <div class="hint">${ui.escapeHtml(t('meta.form.refHint'))}</div>`,
   `<button class="tool-btn" id="miCancel">${ui.escapeHtml(t('common.cancel'))}</button>
    <button class="tool-btn primary" id="miSave">${ui.escapeHtml(t('common.save'))}</button>`);
   if (editing && item.refSetCode) {
     modal.root.querySelector('#miRef').value = item.refSetCode;
   }
+  const saveBtn = modal.root.querySelector('#miSave');
+  const patternInput = modal.root.querySelector('#miContent');
+  const stateEl = modal.root.querySelector('#miPatternState');
+  const testResultEl = modal.root.querySelector('#miTestResult');
+  let patternValid = !isRule;
+
+  /**
+   * Compiles the pattern on the server so the user sees syntax errors before saving.
+   */
+  const checkPattern = async () => {
+    if (!isRule) {
+      return true;
+    }
+    const expression = patternInput.value.trim();
+    patternValid = false;
+    saveBtn.disabled = true;
+    if (!expression) {
+      stateEl.className = 'hint';
+      stateEl.textContent = t('meta.form.rulePatternRequired');
+      return false;
+    }
+    try {
+      const result = await api.post('/api/meta/rules/match', {
+        ruleType: modal.root.querySelector('#miRuleType').value,
+        expression,
+        text: '',
+      });
+      patternValid = result.valid;
+      stateEl.className = result.valid ? 'hint ok' : 'hint error';
+      stateEl.textContent = result.valid ? t('meta.form.rulePatternOk') : result.message;
+    } catch (error) {
+      stateEl.className = 'hint error';
+      stateEl.textContent = error.message || String(error);
+    }
+    saveBtn.disabled = !patternValid;
+    return patternValid;
+  };
+  if (isRule) {
+    let timer = null;
+    patternInput.addEventListener('input', () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(checkPattern, 350);
+    });
+    modal.root.querySelector('#miRuleType').addEventListener('change', checkPattern);
+    modal.root.querySelector('#miTestRun').addEventListener('click', async () => {
+      if (!(await checkPattern())) {
+        testResultEl.className = 'hint error';
+        testResultEl.textContent = stateEl.textContent;
+        return;
+      }
+      try {
+        const result = await api.post('/api/meta/rules/match', {
+          ruleType: modal.root.querySelector('#miRuleType').value,
+          expression: patternInput.value.trim(),
+          text: modal.root.querySelector('#miTestText').value,
+        });
+        testResultEl.className = result.matched ? 'hint ok' : 'hint error';
+        testResultEl.textContent = result.matched
+          ? t('meta.form.ruleTestMatched')
+          : t('meta.form.ruleTestFailed');
+      } catch (error) {
+        testResultEl.className = 'hint error';
+        testResultEl.textContent = error.message || String(error);
+      }
+    });
+    checkPattern();
+  }
   modal.root.querySelector('#miCancel').addEventListener('click', modal.close);
-  modal.root.querySelector('#miSave').addEventListener('click', async () => {
+  saveBtn.addEventListener('click', async () => {
+    if (isRule && !(await checkPattern())) {
+      return;
+    }
     const order = Number(modal.root.querySelector('#miOrder').value) || null;
     if (order !== null && entry.items.some((other) => other.sortOrder === order
         && (!editing || other.code !== item.code))) {
@@ -251,6 +409,9 @@ function openItemEditor(item) {
       sortOrder: order,
       enabled: modal.root.querySelector('#miEnabled').value === 'true',
       remark: modal.root.querySelector('#miRemark').value.trim() || null,
+      content: modal.root.querySelector('#miContent').value.trim() || null,
+      ruleType: isRule ? modal.root.querySelector('#miRuleType').value : null,
+      severity: isRule ? modal.root.querySelector('#miSeverity').value : null,
     };
     try {
       if (editing) {
@@ -294,6 +455,17 @@ async function init() {
   ui.on('btnEditSet', 'click', openSetMetaEditor);
   ui.on('btnDeleteSet', 'click', deleteSet);
   ui.on('btnNewItem', 'click', () => openItemEditor(null));
+  bindDefinitionBackup('META', {
+    sql: 'btnExportSql',
+    xlsx: 'btnExportXlsx',
+    import: 'btnImportDefinitions',
+  }, {
+    label: t('definitions.scope.meta'),
+    onApplied: async () => {
+      invalidateRules();
+      await load();
+    },
+  });
   try {
     await load();
   } catch (error) {

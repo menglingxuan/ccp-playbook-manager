@@ -1,6 +1,8 @@
 package ac.core.service.batch;
 
 import ac.core.common.ApiException;
+import ac.core.common.ErrorCode;
+import ac.core.common.Notes;
 import ac.core.common.PageQuery;
 import ac.core.common.PageResult;
 import ac.core.common.TimeProvider;
@@ -28,20 +30,24 @@ public class BatchService {
     public static final int MAX_TAGS = 10;
     /** Upper bound of a single tag. */
     public static final int MAX_TAG_LENGTH = 32;
-    private static final int MAX_NOTE_LENGTH = 500;
+    /** Upper bound of a batch name, matching the task name limit. */
+    public static final int MAX_NAME_LENGTH = 256;
 
     private final ImportBatchRepository batchRepository;
     private final TestCaseRepository caseRepository;
     private final CaseService caseService;
     private final ac.core.persistence.ImportTaskRepository taskRepository;
+    private final ac.core.service.baseline.BaselineStore baselines;
     private final TimeProvider time;
 
     public BatchService(ImportBatchRepository batchRepository, TestCaseRepository caseRepository,
-            CaseService caseService, ac.core.persistence.ImportTaskRepository taskRepository, TimeProvider time) {
+            CaseService caseService, ac.core.persistence.ImportTaskRepository taskRepository,
+            ac.core.service.baseline.BaselineStore baselines, TimeProvider time) {
         this.batchRepository = batchRepository;
         this.caseRepository = caseRepository;
         this.caseService = caseService;
         this.taskRepository = taskRepository;
+        this.baselines = baselines;
         this.time = time;
     }
 
@@ -84,8 +90,27 @@ public class BatchService {
         return caseService.search(tenantId, filter);
     }
 
-    /** Case counters of one batch, used by the sidebar summary. */
-    public Map<String, Object> caseSummary(String tenantId, String batchId, String query, Boolean hasFormula) {
+    /**
+     * Record ids that repeat inside one batch, used to flag rows in the case table.
+     *
+     * @param business record ids seen more than once
+     * @param core     core business record ids seen more than once
+     */
+    public record CaseDuplicates(List<String> business, List<String> core) {
+        public CaseDuplicates {
+            business = List.copyOf(business);
+            core = List.copyOf(core);
+        }
+    }
+
+    /** Duplicates of both record ids inside one batch; informational only, nothing is enforced. */
+    public CaseDuplicates caseDuplicates(String tenantId, String batchId) {
+        require(tenantId, batchId);
+        return new CaseDuplicates(caseRepository.duplicateBusinessRecordIds(tenantId, batchId),
+                caseRepository.duplicateCoreBusinessRecordIds(tenantId, batchId));
+    }
+
+    /** Case counters of one batch, used by the sidebar summary. */    public Map<String, Object> caseSummary(String tenantId, String batchId, String query, Boolean hasFormula) {
         require(tenantId, batchId);
         PageQuery probe = PageQuery.of(1, 1);
         long total = caseService.search(tenantId, new CaseFilter(batchId, query, false, "row", probe)).total();
@@ -102,20 +127,54 @@ public class BatchService {
     }
 
     /**
+     * Renames a batch; the name stays unique inside the tenant and is capped at 256 characters.
+     *
+     * @param rawName name typed by the user
+     * @return the stored (trimmed) name
+     */
+    @Transactional
+    public String rename(String tenantId, String batchId, String rawName) {
+        ImportBatchRow batch = require(tenantId, batchId);
+        String name = rawName == null ? "" : rawName.trim();
+        if (name.isEmpty()) {
+            throw ApiException.invalid("Batch name must not be empty");
+        }
+        if (name.length() > MAX_NAME_LENGTH) {
+            throw ApiException.invalid("Batch name must be at most " + MAX_NAME_LENGTH + " characters");
+        }
+        if (name.equals(batch.name())) {
+            return name;
+        }
+        if (batchRepository.nameExists(tenantId, batch.taskId(), name)) {
+            throw new ApiException(ErrorCode.CONFLICT, "Batch name '" + name + "' already exists",
+                    Map.of("name", name));
+        }
+        batchRepository.rename(tenantId, batchId, name);
+        return name;
+    }
+
+    /**
      * Updates the console metadata of one batch; missing fields keep their stored value.
      *
+     * <p>The note shares the storage and the rules of the inline batch remark, so both editors show
+     * the same text.
+     *
+     * @param name     new name, {@code null} to keep the current one
      * @param favorite new favorite flag, {@code null} to keep the current one
      * @param pinned   new pinned flag, {@code null} to keep the current one
      * @param tags     replacement tag list, {@code null} to keep the current tags
      * @param note     replacement note, {@code null} to keep the current note
      */
     @Transactional
-    public ImportBatchRow updateMeta(String tenantId, String batchId, Boolean favorite, Boolean pinned,
-            List<String> tags, String note) {
+    public ImportBatchRow updateMeta(String tenantId, String batchId, String name, Boolean favorite,
+            Boolean pinned, List<String> tags, String note) {
         ImportBatchRow current = require(tenantId, batchId);
+        if (name != null) {
+            rename(tenantId, batchId, name);
+        }
         boolean newFavorite = favorite == null ? current.favorite() : favorite;
         boolean newPinned = pinned == null ? current.pinned() : pinned;
-        String newNote = note == null ? current.note() : normalizeNote(note);
+        String newNote = note == null ? current.note() : Notes.normalize(note);
         String newTags = tags == null ? current.tags() : encodeTags(tags);
         batchRepository.updateMeta(tenantId, batchId, newNote, newFavorite, newPinned, newTags, time.nowUtc());
         return batchRepository.find(tenantId, batchId).orElse(current);
@@ -129,6 +188,8 @@ public class BatchService {
         batchRepository.softDelete(tenantId, batchId, now);
         // the batch no longer counts towards its task (clones are part of that list as well)
         taskRepository.adjustBatchCount(tenantId, batch.taskId(), -1);
+        // the workbook baseline cannot be reached any more, so it must not stay on disk
+        baselines.delete(tenantId, batchId);
     }
 
     public int activeCaseCount(String tenantId, String batchId) {
@@ -167,14 +228,6 @@ public class BatchService {
             throw ApiException.invalid("A batch may carry at most " + MAX_TAGS + " tags");
         }
         return normalized.isEmpty() ? "" : "," + String.join(",", normalized) + ",";
-    }
-
-    private static String normalizeNote(String note) {
-        String trimmed = note.trim();
-        if (trimmed.length() > MAX_NOTE_LENGTH) {
-            throw ApiException.invalid("Note must be at most " + MAX_NOTE_LENGTH + " characters");
-        }
-        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private static List<FacetCount> toCounts(Map<String, Long> counts) {
